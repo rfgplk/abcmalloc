@@ -1,0 +1,18 @@
+* best in class performance
+* fastest memory allocations and deallocations
+* innovative stack-like allocator design (neweset allocs always go at the end)
+* extesnive hardening and security features
+* novel features, such as laundering memory, storing active metadata
+* modular design
+* extreme space packing efficient
+* always returning aligned addresses
+* cache locality
+* per-thread and global lock allocator
+* immutable mode via laundering
+* small code size, offering rapid compilations
+
+
+
+* best suited for applications where lots of packed allocs occur
+* best suited for applications with high throughput of allocs
+* modular configurable design

@@ -1,0 +1,66 @@
+# build.ninja
+timer = /usr/bin/time -p
+compiler_gnuc = gcc
+compiler_gnu = g++
+custom_libc_start = -nostartfiles src/asm/__start.S -x c
+no_libc = -nostartfiles src/asm/__start.S
+include_libc_start = start.o
+compiler_llvm = clang++
+
+
+cflags_debug = -g -march=native
+cflags_optimizations = -Ofast -mavx2 -mbmi -march=native
+
+# annoying but works
+cflags_warn_all_llvm = -Weverything
+cflags_warn_base = -Wall -Wextra -Wpedantic
+cflags_warn_options = -Wno-cpp -Wunused -Wshadow -Wconversion -Wcast-qual -Wconversion-null -Woverlength-strings -Wpointer-arith -Wunused-local-typedefs -Wunused-result -Wvarargs -Wvla -Wwrite-strings -Wduplicated-cond -Wdouble-promotion -Wdisabled-optimization -Winline -Wfloat-equal -Wmissing-noreturn -Wpacked -Wnonnull -Wundef -Wtrampolines -Winline -Winit-self -Wcast-align -Wnarrowing -Wregister -Wmain -Wchanges-meaning -Wsequence-point -Wattributes 
+cflags_extra_errors = -Werror=return-type
+cflags_warn_ignore = -Wno-implicit-fallthrough -Wno-sign-conversion -Wno-variadic-macros
+
+cflags_ext = -nodefaultlibs -fstack-protector-strong -fstrict-overflow -fopenmp -fext-numeric-literals -ffast-math -flto -fdiagnostics-color=always -fconcepts-diagnostics-depth=2
+cflags_ext_llvm = -fopenmp -ffast-math -flto -fdiagnostics-color=always
+
+
+
+
+cflags_gnu_debug =  -std=c++23 $cflags_debug $cflags_warn_base $cflags_warn_options $cflags_warn_ignore $cflags_extra_errors $cflags_ext
+cflags_gnu =  -std=c++23 $cflags_optimizations $cflags_warn_base $cflags_warn_options $cflags_warn_ignore $cflags_extra_errors $cflags_ext
+cflags_gnuc =  -std=c11 $cflags_optimizations $cflags_warn_base $cflags_ext
+cflags_llvm =  -std=c++23 $cflags_optimizations $cflags_warn_all_llvm $cflags_ext_llvm
+compile_flags_std = -lc -lgcc -lgcc_s -lstdc++ -lm
+compile_flags_start = -c
+
+clibs_location = -L./libs
+clibs_includes = -Isrc
+
+clibs_static = -static-libstdc++
+build_directory = bin
+
+rule cc_compile_cmnd
+  command = echo -e "\n\n\033[1;32mBuilding:\033[0m $out" && $timer $compiler_gnu $cflags_gnu $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
+
+rule cc_compile_cmnd_debug_no_libc
+  command = echo -e "\n\n\033[1;32mBuilding:\033[0m $out" && $timer $compiler_gnu $no_libc $cflags_gnu_debug $clibs_location $clibs_includes $in $compile_flags_std $include_libc_start -o $build_directory/$out;
+rule cc_compile_cmnd_debug
+  command = echo -e "\n\n\033[1;32mBuilding:\033[0m $out" && $timer $compiler_gnu $cflags_gnu_debug $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
+
+build bench_abcmalloc_4gb: cc_compile_cmnd tests/general/abcmalloc_bench_abc_4gb.cpp
+build bench_abcmalloc_large: cc_compile_cmnd tests/general/abcmalloc_bench_abc_large.cpp
+build bench_abcmalloc_large_freq: cc_compile_cmnd tests/general/abcmalloc_bench_abc_large_freq.cpp
+build bench_abcmalloc_small: cc_compile_cmnd tests/general/abcmalloc_bench_abc_small.cpp
+build bench_abcmalloc: cc_compile_cmnd tests/general/abcmalloc_bench_abc.cpp
+build bench_base_malloc: cc_compile_cmnd tests/general/abcmalloc_bench_malloc.cpp
+build test_abcmalloc_simple: cc_compile_cmnd_debug tests/simple.cpp
+build test_abcmalloc_leak: cc_compile_cmnd tests/leak.cpp
+build test_abcmalloc_align: cc_compile_cmnd tests/alignment.cpp
+build test_abcmalloc_shuffle: cc_compile_cmnd_debug tests/shuffle.cpp
+build test_abcmalloc_realloc: cc_compile_cmnd_debug tests/realloc.cpp
+build test_abcmalloc_stress: cc_compile_cmnd_debug tests/stress.cpp
+build test_abcmalloc_fuzz: cc_compile_cmnd_debug tests/fuzz.cpp
+build test_abcmalloc_fuzz_conv: cc_compile_cmnd_debug tests/fuzz_conv.cpp
+build test_abcmalloc_is_zeroed: cc_compile_cmnd_debug tests/is_zeroed.cpp
+build test_abcmalloc_list_strings: cc_compile_cmnd_debug tests/list_strings.cpp
+build test_abcmalloc_tree: cc_compile_cmnd_debug tests/tree.cpp
+
+build abcmalloc_benches: phony bench_abcmalloc_4gb bench_abcmalloc_large bench_abcmalloc_large_freq  bench_abcmalloc_small bench_abcmalloc bench_base_malloc
