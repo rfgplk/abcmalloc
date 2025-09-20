@@ -17,6 +17,31 @@ abcmalloc is a c++23 memory allocator designed to deliver best-in-class performa
 
 <br/>
 
+API
+----
+```cpp
+// all main public facing functions are found within src/malloc.hpp
+bool is_present(addr_t* ptr); // checks if the given pointer has been allocated
+bool within(addr_t* ptr); // checks if pointer if technically addressable at any known page owned by abcmalloc
+void relinquish(btre* ptr); // unmaps entire sheet on which the pointer lives (unsafe, use with caution)
+chunk<byte> balloc(size_t size); // allocated memory, return chunk { ptr, len }
+chunk<byte> fetch(size_t size); // equivalent as balloc
+void retire(byte* ptr); // frees (tombstones) memory
+
+byte* alloc(size_t size); // allocates memory, identical to ::malloc
+void dealloc(byte* ptr); // frees memory, identical to ::free
+void dealloc(byte *ptr, size_t len); // frees memory with a length argument
+void freze(byte* ptr); // freezes memory (invokes mlock)
+byte* launder(size_t size); // launders memory (allocates any address, even if already occupied - use for immutable structures only)
+size_t query_size(byte* ptr); // queries the underlying allocated size of pointer
+
+// libc legacy compatibility
+void* malloc(size_t size); // ::malloc
+void* calloc(size_t num, size_t size); // ::calloc
+void* realloc(void* ptr, size_t size); // ::realloc
+void free(void* ptr); // ::free
+```
+
 
 
 Features
