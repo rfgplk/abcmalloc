@@ -85,7 +85,7 @@ Motivation
 <p align="justify"> 
 
 > [!WARNING]
-> abcmalloc has a strong requirement that all memory requested from the kernel is *immediately accessible* and *fully addressable*. to ensure correct behavior, it strongly recommends configuring the kernel with:
+> abcmalloc has a **strong requirement** that all memory requested from the kernel is *immediately accessible* and *fully addressable*. to ensure correct behavior, it strongly recommends configuring the kernel with:
 > ``` vm.overcommit_memory = 2 ```
 
 Drawbacks and Limitations
