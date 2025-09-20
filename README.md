@@ -1,4 +1,4 @@
-<img align="left" style="width:300px" src="https://github.com/user-attachments/assets/0a2fc934-93dc-448e-860f-56f9334a0946" alt="abc_logo" width="300"/> 
+<img align="left" style="width:300px" src="https://github.com/user-attachments/assets/2a9138b7-c521-4a32-b0c5-e5715627e88f" alt="abc_logo" width="300"/> 
 
 <div align="left">
 
