@@ -24,7 +24,7 @@ API
 bool is_present(addr_t* ptr); // checks if the given pointer has been allocated
 bool within(addr_t* ptr); // checks if pointer if technically addressable at any known page owned by abcmalloc
 void relinquish(btre* ptr); // unmaps entire sheet on which the pointer lives (unsafe, use with caution)
-chunk<byte> balloc(size_t size); // allocated memory, return chunk { ptr, len }
+chunk<byte> balloc(size_t size); // allocates memory, return chunk { ptr, len }
 chunk<byte> fetch(size_t size); // equivalent as balloc
 void retire(byte* ptr); // frees (tombstones) memory
 
