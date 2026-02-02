@@ -57,6 +57,24 @@ Features
  - supports both per-thread and global lock allocation modes
  - immutable mode enabled via laundering
 
+Is This Usable Out of the Box?
+------------------------------
+
+Yes, fully. The standard `config.hpp` file provided is pretuned for general amd64 workstations with sufficient RAM size (>16 GB), while the `config_embed.hpp` file is pretuned for embedded platforms (or platforms with memory constrains (<256 MB)). You might need to fine tune certain settings if you desire optimal performance.
+
+
+Where is LD_PRELOAD Support?
+-----------------------------
+
+Haven't gotten around to adding compiler settings for it yet. Should be fairly simple to build a simple `*.so` file without much hassle. Otherwise, it's generally preferable to call `abc::` namespaced functions.
+
+
+Where is C/zig/Rust Support?
+-----------------------------
+
+No plans to make bindings and/or ports for/to those languages any time soon, sorry.
+
+
 Performance Metrics
 -------------------
 - achieves **~66% average** effective memory utilization, approaching ~100% for page-multiple allocations (4096 bytes)
@@ -69,6 +87,7 @@ Use Cases
 
 abcmalloc is best suited for:
 
+ - designs where intricate control of the allocator is desired
  - workloads requiring high throughput
  - workloads requiring consistent aligned addresses
  - workloads spanning a wide random range of allocated sizes

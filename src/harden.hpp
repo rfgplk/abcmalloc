@@ -5,10 +5,10 @@
 //  http://www.boost.org/LICENSE_1_0.txt
 #pragma once
 
+#include "config.hpp"
 #include <micron/memory/cmemory.hpp>
 #include <micron/simd/types.hpp>
 #include <micron/types.hpp>
-#include "config.hpp"
 
 namespace abc
 {
@@ -35,6 +35,16 @@ fail_state(void)
   return true;
 }
 #pragma GCC diagnostic pop
+
+inline __attribute__((always_inline)) auto
+check_constraint(const size_t sz) -> bool
+{
+  if constexpr ( __is_constrained ) {
+    if ( sz > __alloc_limit )
+      return true;
+  }
+  return false;
+}
 
 inline __attribute__((always_inline)) void
 sanitize_on_alloc(byte *addr, size_t sz = 0)

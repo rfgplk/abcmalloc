@@ -28,11 +28,17 @@
 // main thread-specific api functions go here
 // all external code (non-test) calling abcmalloc code should go through here
 
+#include <iostream>
+
 namespace abc
 {
 micron::mutex __global_mutex;
 thread_local static bool __abcmalloc_init = false;
 thread_local static __arena *__main_arena = nullptr;
+
+__attribute__((noinline))
+void __thread_init(void){
+}
 
 // global construction
 // NOTE: attr constructor will fire after zero-initialization of all static variables, but BEFORE dynamic init. of all

@@ -61,6 +61,8 @@ build test_abcmalloc_fuzz: cc_compile_cmnd_debug tests/fuzz.cpp
 build test_abcmalloc_fuzz_conv: cc_compile_cmnd_debug tests/fuzz_conv.cpp
 build test_abcmalloc_is_zeroed: cc_compile_cmnd_debug tests/is_zeroed.cpp
 build test_abcmalloc_list_strings: cc_compile_cmnd_debug tests/list_strings.cpp
-build test_abcmalloc_tree: cc_compile_cmnd_debug tests/tree.cpp
+build test_abcmalloc_tree: cc_compile_cmnd tests/tree.cpp
+build test_abcmalloc_broad: cc_compile_cmnd tests/broad.cpp
+build test_abcmalloc_thread: cc_compile_cmnd tests/threading.cpp
 
 build abcmalloc_benches: phony bench_abcmalloc_4gb bench_abcmalloc_large bench_abcmalloc_large_freq  bench_abcmalloc_small bench_abcmalloc bench_base_malloc
