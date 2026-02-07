@@ -2,14 +2,15 @@
 
 <div align="left">
 
-### *abcmalloc*  <img src="https://img.shields.io/badge/version-indev-green">
+### *abcmalloc* 🐊  <img src="https://img.shields.io/badge/version-indev-green">
 
 #### a modern memory allocator
 abcmalloc is a c++23 memory allocator designed to deliver best-in-class performance while maintaining strong security guarantees. it is extensively tested, engineered for strong cache locality, and provides a buddy list–based allocation scheme for efficient space management and rapid block splitting & merging.
 
 </div>
 
-
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![C++23](https://img.shields.io/badge/C++-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 
 ------
 
