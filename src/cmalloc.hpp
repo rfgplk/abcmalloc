@@ -21,9 +21,10 @@
 
 #pragma once
 
-
 #define MICRON_ABCMALLOC 1
 #define MICRON_ABCMALLOC_DISABLE_STD 1
+
+#include "version.hpp"
 
 // only if we're not already including abcmalloc externally
 #include "__abc.hpp"

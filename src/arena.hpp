@@ -21,13 +21,15 @@
 
 #pragma once
 
-#include <micron/allocation/linux/kmemory.hpp>
+#include <micron/allocation/kmemory.hpp>
 #include <micron/closures.hpp>
 #include <micron/concepts.hpp>
 #include <micron/control.hpp>
 #include <micron/numerics.hpp>
 #include <micron/type_traits.hpp>
 #include <micron/types.hpp>
+
+#include <micron/linux/sys/sysinfo.hpp>
 
 #include "prediction.hpp"
 
@@ -39,44 +41,19 @@
 #include "oom.hpp"
 #include "stats.hpp"
 
-#ifndef __OPTIMIZE__
-/*permitted*/ #include<iostream>
-#endif
+#include "printing.hpp"
 
 namespace abc
 {
-
-inline __attribute__((always_inline)) void
-__debug_print(const char *str [[maybe_unused]], const size_t n [[maybe_unused]])
-{
-#ifndef __OPTIMIZE__
-  // NOTE: we're using iostream since our io library depends on malloc()
-  if constexpr ( __default_debug_notices ) {
-    std::cout << "\033[34mabcmalloc[] debug: \033[0m " << str << " with size: " << n << std::endl;
-  }
-#endif
-}
-
-template <typename T>
-inline __attribute__((always_inline)) void
-__debug_print(const char *str [[maybe_unused]], T &t [[maybe_unused]])
-{
-#ifndef __OPTIMIZE__
-  // NOTE: we're using iostream since our io library depends on malloc()
-  if constexpr ( __default_debug_notices ) {
-    std::cout << "\033[34mabcmalloc[] debug: \033[0m " << str << " at addr: " << static_cast<const void *>(t)
-              << std::endl;
-  }
-#endif
-}
 class __arena : private cache
 {
   template <typename T> struct alignas(16) node {
     T *nd;
     node<T> *nxt;
   };
+
   alloc_predictor __predict;
-  sheet<__class_arena_internal> _arena_memory;     // 2 MiB metadata buffer
+  sheet<__class_arena_internal> _arena_memory;
   node<sheet<__class_precise>> _cache_buffer;
   node<sheet<__class_arena_internal>> _arena_buffer;
   node<sheet<__class_arena_internal>> *_tail_arena_buffer;
@@ -84,17 +61,18 @@ class __arena : private cache
   node<sheet<__class_small>> *_tail_small_buckets;
   node<sheet<__class_medium>> _medium_buckets;
   node<sheet<__class_medium>> *_tail_medium_buckets;
-  node<sheet<__class_large>> _large_buckets;     // only init if needed
+  node<sheet<__class_large>> _large_buckets;
   node<sheet<__class_large>> *_tail_large_buckets;
-  node<sheet<__class_huge>> _huge_buckets;     // only init if needed
+  node<sheet<__class_huge>> _huge_buckets;
   node<sheet<__class_huge>> *_tail_huge_buckets;
+
   void
   __reload_arena_buf(void)
   {
     // if arena buf is full, double it's capacity (inefficient and naive but it works)
-    __expand_bucket_arena<__class_arena_internal>(&_arena_buffer, _tail_arena_buffer,
-                                                  _tail_arena_buffer->nd->allocated() * 2);
+    __expand_bucket_arena<__class_arena_internal>(&_arena_buffer, _tail_arena_buffer, _tail_arena_buffer->nd->allocated() * 2);
   }
+
   template <u64 Sz, typename F, typename G>
   inline __attribute__((always_inline)) void
   __expand_bucket_arena(F *nd, G *&tail, const size_t sz)
@@ -102,11 +80,12 @@ class __arena : private cache
     while ( nd->nxt != nullptr ) {
       nd = nd->nxt;
     }
+    __debug_print("__expand_bucket_arena() with req. space: ", sz);
     micron::__chunk<byte> buf_nd = _arena_memory.try_mark(sizeof(node<sheet<Sz>>));
     micron::__chunk<byte> buf = _arena_memory.try_mark(sizeof(sheet<Sz>));
     // _arena_memory is full and unable to slot in more memory
     if ( buf_nd.failed_allocation() or buf.failed_allocation() ) [[unlikely]] {
-      // TODO: add error
+      __debug_print("__expand_bucket_arena() failed to reallocate arena with size: ", sz);
       abort_state();
     }
     nd->nxt = new (buf_nd.ptr) node<sheet<Sz>>();
@@ -149,98 +128,82 @@ class __arena : private cache
     micron::__chunk<byte> buf = _tail_arena_buffer->nd->try_mark(sizeof(sheet<Sz>));
     // _arena_memory is full and unable to slot in more memory
     if ( buf_nd.failed_allocation() or buf.failed_allocation() ) [[unlikely]] {
+      __debug_print("__expand_bucket(): allocation failed (memory was full most likely)", 0);
       __reload_arena_buf();
       goto retry_memory_e;
     }
     nd->nxt = new (buf_nd.ptr) node<sheet<Sz>>();
-    nd->nxt->nd = new (buf.ptr) sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(sz));
+    if constexpr ( __default_insert_guard_pages ) {
+      // plus an additional for the guard page
+      auto chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz + __system_pagesize);
+      __make_guard(chnk);
+      nd->nxt->nd = new (buf.ptr) sheet<Sz>(chnk, __system_pagesize);
+    } else {
+      nd->nxt->nd = new (buf.ptr) sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(sz));
+    }
     nd->nxt->nxt = nullptr;
     if ( tail )
       tail = nd->nxt;
   }
-  /*
-    template <u64 Sz, typename F, typename G>
-    inline __attribute__((always_inline)) void
-    __expand_bucket(F *nd, G *&tail)
-    {
-      __debug_print("__expand_bucket_arena() with req. space: ", Sz);
-      size_t sz = __calculate_desired_space(Sz);     //(__default_page_mul * __system_pagesize);
-      __debug_print("calculated space: ", sz);
-      while ( nd->nxt != nullptr ) {
-        nd = nd->nxt;
-      }
-    retry_memory:
-      micron::__chunk<byte> buf_nd = _tail_arena_buffer->nd->try_mark(sizeof(node<sheet<Sz>>));
-      micron::__chunk<byte> buf = _tail_arena_buffer->nd->try_mark(sizeof(sheet<Sz>));
-      // _arena_memory is full and unable to slot in more memory
-      if ( buf_nd.failed_allocation() or buf.failed_allocation() ) [[unlikely]] {
-        __reload_arena_buf();
-        goto retry_memory;
-      }
-      nd->nxt = new (buf_nd.ptr) node<sheet<Sz>>();
-      nd->nxt->nd = new (buf.ptr) sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(sz));
-      nd->nxt->nxt = nullptr;
-      tail = nd->nxt;
-    }
-  */
-  template <u64 Sz, typename F, typename G>
+
   inline __attribute__((always_inline)) void
-  __insert_guard(F *nd, G *&tail)
+  __make_guard(micron::__chunk<byte> &mem)
   {
-    if constexpr ( __default_insert_guard_pages ) {
-      __debug_print("__insert_guard():", 0);
-      __expand_bucket<Sz, F, G>(nd, tail, 4096);
-      nd->nxt->nd->freeze(__default_guard_page_perms);
+    __debug_print_addr("__make_guard() @", mem.ptr + (mem.len - __system_pagesize));
+
+    if ( long int r = micron::mprotect(mem.ptr + (mem.len - __system_pagesize), __system_pagesize, __default_guard_page_perms); r != 0 ) {
+      __debug_print("Failed to make guard page", r);
+      abort_state();
     }
   }
+
   void
   __buf_expand_exact(const size_t class_sz, const size_t exact_sz)
   {
-
-    if ( class_sz < __class_small ) {
+    if ( class_sz <= __class_small ) {
       __expand_cache<__class_precise>(&_cache_buffer, exact_sz);
-    } else if ( class_sz < __class_medium ) {
-      __expand_bucket<__class_small>(&_small_buckets, _tail_small_buckets, exact_sz);
-      __insert_guard<__class_small>(&_small_buckets, _tail_small_buckets);
-    } else if ( class_sz <= __class_large and class_sz >= __class_medium ) {
-      __expand_bucket<__class_medium>(&_medium_buckets, _tail_medium_buckets, exact_sz);
-      __insert_guard<__class_small>(&_small_buckets, _tail_small_buckets);
-    } else if ( class_sz <= __class_huge and class_sz > __class_large ) {
-      if ( _large_buckets.nd == nullptr ) [[unlikely]] {
-        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets, exact_sz);
-      } else
-        __expand_bucket<__class_large>(&_large_buckets, _tail_large_buckets, exact_sz);
-      __insert_guard<__class_small>(&_small_buckets, _tail_small_buckets);
-    } else if ( class_sz > __class_huge ) {
-      if ( _huge_buckets.nd == nullptr ) [[unlikely]] {
-        __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets, exact_sz);
-      } else
-        __expand_bucket<__class_huge>(&_huge_buckets, _tail_huge_buckets, exact_sz);
-      __insert_guard<__class_small>(&_small_buckets, _tail_small_buckets);
+      return;
     }
+
+    if ( class_sz < __class_medium ) [[likely]] {
+      if constexpr ( __default_lazy_construct ) {
+        if ( _small_buckets.nd == nullptr ) [[unlikely]]
+          __init_bucket<__class_small>(_small_buckets, _tail_small_buckets);
+        else
+          __expand_bucket<__class_small>(&_small_buckets, _tail_small_buckets, exact_sz);
+      } else {
+        __expand_bucket<__class_small>(&_small_buckets, _tail_small_buckets, exact_sz);
+      }
+      return;
+    }
+
+    if ( class_sz <= __class_large ) {
+      if constexpr ( __default_lazy_construct ) {
+        if ( _medium_buckets.nd == nullptr ) [[unlikely]]
+          __init_bucket<__class_medium>(_medium_buckets, _tail_medium_buckets);
+        else
+          __expand_bucket<__class_medium>(&_medium_buckets, _tail_medium_buckets, exact_sz);
+      } else {
+        __expand_bucket<__class_medium>(&_medium_buckets, _tail_medium_buckets, exact_sz);
+      }
+      return;
+    }
+
+    if ( class_sz <= __class_huge ) {
+      if ( _large_buckets.nd == nullptr ) [[unlikely]]
+        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets);
+      else
+        __expand_bucket<__class_large>(&_large_buckets, _tail_large_buckets, exact_sz);
+      return;
+    }
+
+    // class_sz > __class_huge
+    if ( _huge_buckets.nd == nullptr ) [[unlikely]]
+      __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets);
+    else
+      __expand_bucket<__class_huge>(&_huge_buckets, _tail_huge_buckets, exact_sz);
   }
 
-  /*
-  void
-  __buf_expand_class(const size_t hint_sz)
-  {
-    if ( hint_sz < __class_medium ) {
-      __expand_bucket<__class_small>(&_small_buckets, _tail_small_buckets);
-      __insert_guard<__class_small>(&_small_buckets, _tail_small_buckets);
-    } else if ( hint_sz <= __class_large and hint_sz >= __class_medium ) {
-      __expand_bucket<__class_medium>(&_medium_buckets, _tail_medium_buckets);
-    } else if ( hint_sz <= __class_huge and hint_sz > __class_large ) {
-      if ( _large_buckets.nd == nullptr ) [[unlikely]] {
-        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets);
-      } else
-        __expand_bucket<__class_large>(&_large_buckets, _tail_large_buckets);
-    } else if ( hint_sz > __class_huge ) {
-      if ( _huge_buckets.nd == nullptr ) [[unlikely]] {
-        __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets);
-      } else
-        __expand_bucket<__class_huge>(&_huge_buckets, _tail_huge_buckets);
-    }
-  }*/
   template <typename F>
   bool
   __within(F *__node, addr_t *memory) const
@@ -257,6 +220,7 @@ class __arena : private cache
     }
     return false;
   }
+
   template <typename F>
   bool
   __locate_at(F *__node, addr_t *memory) const
@@ -275,6 +239,7 @@ class __arena : private cache
     }
     return false;
   }
+
   template <typename F>
   bool
   __locate(F *__node, const micron::__chunk<byte> &memory) const
@@ -293,6 +258,7 @@ class __arena : private cache
     }
     return false;
   }
+
   template <typename F>
   micron::__chunk<byte>
   __append_bucket(F *nd, const size_t sz)
@@ -312,6 +278,7 @@ class __arena : private cache
     }
     return memory;
   }
+
   template <typename F>
   micron::__chunk<byte>
   __append_bucket_launder(F *nd, const size_t sz)
@@ -330,7 +297,7 @@ class __arena : private cache
   bool
   __find_and_tombstone(F *__node, const micron::__chunk<byte> &memory)
   {
-    F *__init_nd = __node;
+    // F *__init_nd = __node;
     F *__p_head = __node;
     while ( __node != nullptr ) {
       if ( __node->nd == nullptr ) {
@@ -340,9 +307,11 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;
 
-      if ( sh.is_at(micron::real_addr(memory.ptr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(memory.ptr)) ) [[unlikely]] {
         if ( sh.try_tombstone(memory) ) {
-          if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
+          // work with tombstoning properly
+          // if tombstoned fraction is more than 50% available mem
+          if ( sh.tombstoned() > (sh.ftotal() >> 1) and sh.used() == 0 )     // ignores root sheet req
           {
             sh.reset();
             __p_head->nxt = __node->nxt;     // relink
@@ -356,11 +325,12 @@ class __arena : private cache
     }
     return false;
   }
+
   template <typename F>
   bool
   __find_and_tombstone(F *__node, byte *addr)
   {
-    F *__init_nd = __node;
+    // F *__init_nd = __node;
     F *__p_head = __node;
     while ( __node != nullptr ) {
       if ( __node->nd == nullptr ) {
@@ -370,9 +340,10 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;     // safe
 
-      if ( sh.is_at(micron::real_addr(addr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(addr)) ) [[unlikely]] {
         if ( sh.try_tombstone_no_size(addr) )
-          if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
+          // if tombstoned fraction is more than 50% available mem
+          if ( sh.tombstoned() > (sh.ftotal() >> 1) and sh.used() == 0 )     // ignores root sheet req
           {
             sh.reset();
             __p_head->nxt = __node->nxt;     // relink
@@ -391,6 +362,7 @@ class __arena : private cache
   {
     F *__init_nd = __node;
     F *__p_head = __node;
+    __debug_print_addr("__find_and_remove(): searching for ", memory.ptr);
     while ( __node != nullptr ) {
       if ( __node->nd == nullptr ) {
         __p_head = __node;
@@ -399,11 +371,13 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;
 
-      if ( sh.is_at(micron::real_addr(memory.ptr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(memory.ptr)) ) [[unlikely]] {
+        __debug_print_addr("found ", memory.ptr);
         if constexpr ( !__default_tombstone ) {
           if ( sh.try_unmark(memory) ) {
             if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
             {
+              __debug_print_addr("__find_and_remove(): wiping sheet @", __node);
               sh.reset();
               __p_head->nxt = __node->nxt;     // relink
             }
@@ -411,8 +385,9 @@ class __arena : private cache
           }
         } else {
           if ( sh.try_tombstone(memory) ) {
-            if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
-            {
+            // if tombstoned fraction is more than 50% available mem
+            if ( sh.tombstoned() > (sh.ftotal() >> 1) and sh.used() == 0 ) {
+              __debug_print_addr("__find_and_remove(): wiping sheet @", __node);
               sh.reset();
               __p_head->nxt = __node->nxt;     // relink
             }
@@ -426,12 +401,14 @@ class __arena : private cache
     }
     return false;
   }
+
   template <typename F>
   bool
   __find_and_remove(F *__node, byte *addr)
   {
     F *__init_nd = __node;
     F *__p_head = __node;
+    __debug_print_addr("__find_and_remove(): searching for ", addr);
     while ( __node != nullptr ) {
       if ( __node->nd == nullptr ) {
         __p_head = __node;
@@ -440,23 +417,32 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;     // safe
 
-      if ( sh.is_at(micron::real_addr(addr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(addr)) ) [[unlikely]] {
+        __debug_print_addr("found ", addr);
         if constexpr ( !__default_tombstone ) {
-          if ( sh.try_unmark_no_size(addr) )
+          if ( sh.try_unmark_no_size(addr) ) {
+            __debug_print("usage of sheet = ", sh.used());
             if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
             {
+              __debug_print_addr("__find_and_remove(): wiping sheet @", __node);
               sh.reset();
               __p_head->nxt = __node->nxt;     // relink
-            }
-          return true;
+            } else
+              __debug_print_addr("__find_and_remove(): sheet is root @", __node);
+            return true;
+          }
         } else {
-          if ( sh.try_tombstone_no_size(addr) )
-            if ( sh.used() == 0 and __node != __init_nd )     // always keep one sheet around
-            {
+          if ( sh.try_tombstone_no_size(addr) ) {
+            __debug_print("usage of sheet = ", sh.ftotal());
+            // if tombstoned fraction is more than 50% available mem
+            if ( sh.tombstoned() > (sh.ftotal() >> 1) and sh.used() == 0 ) {
+              __debug_print_addr("__find_and_remove(): wiping sheet @", __node);
               sh.reset();
               __p_head->nxt = __node->nxt;     // relink
-            }
-          return true;
+            } else
+              __debug_print_addr("__find_and_remove(): sheet is root @", __node);
+            return true;
+          }
         }
       }
       __p_head = __node;
@@ -476,7 +462,7 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;
 
-      if ( sh.is_at(micron::real_addr(memory.ptr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(memory.ptr)) ) [[unlikely]] {
         if ( sh.freeze() ) {
           return true;
         } else
@@ -498,13 +484,14 @@ class __arena : private cache
       }
       auto &sh = *__node->nd;     // safe
 
-      if ( sh.is_at(micron::real_addr(addr)) ) [[unlikely]] {
+      if ( sh.is_at(reinterpret_cast<addr_t *>(addr)) ) [[unlikely]] {
         return sh.freeze();
       }
       __node = __node->nxt;
     }
     return false;
   }
+
   bool
   __vmap_freeze(const micron::__chunk<byte> &memory)
   {
@@ -520,6 +507,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_freeze_at(byte *addr)
   {
@@ -535,6 +523,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_tombstone(const micron::__chunk<byte> &memory)
   {
@@ -550,6 +539,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_tombstone_at(byte *addr)
   {
@@ -565,6 +555,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_within(addr_t *addr) const
   {
@@ -580,6 +571,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_locate_at(addr_t *addr) const
   {
@@ -597,6 +589,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_remove(const micron::__chunk<byte> &memory)
   {
@@ -612,6 +605,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   bool
   __vmap_remove_at(byte *addr)
   {
@@ -627,6 +621,7 @@ class __arena : private cache
       return true;
     return false;
   }
+
   hot_fn(micron::__chunk<byte>) __append_cache(const size_t sz)
   {
     micron::__chunk<byte> memory = { nullptr, 0 };
@@ -664,6 +659,7 @@ class __arena : private cache
     // could be nullptr here
     return memory;
   }
+
   micron::__chunk<byte>
   __vmap_append(const size_t sz)
   {
@@ -680,6 +676,7 @@ class __arena : private cache
     // could be nullptr here
     return memory;
   }
+
   micron::__chunk<byte>
   __vmap_launder(const size_t sz)
   {
@@ -696,11 +693,11 @@ class __arena : private cache
     // could be nullptr here
     return memory;
   }
+
   template <u64 Sz, typename F>
   void
-  __init_cache(F &bucket)
+  __init_cache(F &bucket, size_t n = __default_cache_size_factor * Sz)
   {
-    size_t n = (1 << 12) * Sz;
     __debug_print("__init_bucket(): ", n);
     micron::__chunk<byte> buf = _arena_memory.try_mark(sizeof(sheet<Sz>));
     bucket = { new (buf.ptr) sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(n)), nullptr };
@@ -742,6 +739,7 @@ class __arena : private cache
       nd = nd->nxt;
     } while ( nd != nullptr );
   }
+
   template <typename F, typename Fn, typename... Args>
   void
   __for_each_bckt_void(const F &bucket, Fn fn, Args &&...args) const
@@ -754,6 +752,7 @@ class __arena : private cache
       nd = nd->nxt;
     } while ( nd != nullptr );
   }
+
   template <typename F, typename Fn, typename... Args>
   auto
   __for_each_bckt(const F &bucket, Fn fn, Args &&...args) const -> micron::lambda_return_t<decltype(fn)>
@@ -805,6 +804,7 @@ initialized during the construction of the subobjects is destroyed. If the destr
 or thread storage duration exits via an exception, the function std::terminate is called (14.6.2).
     * */
   }
+
   __arena(void)
       : _arena_memory(__get_kernel_chunk<micron::__chunk<byte>>(__default_arena_page_buf * __system_pagesize)),
         _cache_buffer{ nullptr, nullptr }, _arena_buffer{ nullptr, nullptr }, _tail_arena_buffer{ nullptr },
@@ -812,16 +812,80 @@ or thread storage duration exits via an exception, the function std::terminate i
         _tail_medium_buckets{ nullptr }, _large_buckets{ nullptr, nullptr }, _tail_large_buckets{ nullptr },
         _huge_buckets{ nullptr, nullptr }, _tail_huge_buckets{ nullptr }
   {
-    __init_bucket<__class_arena_internal>(_arena_buffer, _tail_arena_buffer,
-                                          (__default_arena_page_buf * __system_pagesize));
-    __init_cache<__class_precise>(_cache_buffer);
-    __init_bucket<__class_small>(_small_buckets, _tail_small_buckets);        // 1.6MB
-    __init_bucket<__class_medium>(_medium_buckets, _tail_medium_buckets);     // 283KB
-    if constexpr ( __default_init_large_pages or !__is_constrained ) {
-      __init_bucket<__class_large>(_large_buckets, _tail_large_buckets);     // 3.54MB
-      __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets);        // 40.8MB
+    micron::sysinfo info;
+    auto __share = []<u64 Class>(u64 total) -> u64 {
+      if ( total == 0 ) [[unlikely]]
+        return __default_magic_size;
+      constexpr f64 alpha_factor = 0.33f;
+      if constexpr ( __wordsize == 64 ) {
+        // 2 << s  = 2^(s+1)
+        u32 shift = __builtin_ctzll(Class);     // val = 1 << shift
+
+        // 1/val  → 2^(K - shift), K = 63
+        f64 w = 63.0 - f64(shift);
+        u64 weight = static_cast<u64>(micron::math::pow(2.0, w * alpha_factor) + 0.5);
+
+        const u32 shifts[5] = { __class_precise_shift, __class_small_shift, __class_medium_shift, __class_large_shift, __class_huge_shift };
+
+        f64 __denom = 0.0;
+        for ( u32 i = 0; i < 5; ++i ) {
+          f64 wi = 63.0 - f64(shifts[i]);
+          __denom += micron::math::pow(2.0, wi * alpha_factor);
+        }
+        u64 denom = static_cast<u64>(__denom + 0.5);
+
+        u128 num = static_cast<u128>(total) * weight;
+        u64 frac = num / denom;
+        if ( frac % __system_pagesize != 0 )
+          frac += __system_pagesize - (frac % __system_pagesize);
+        return frac;
+      } else if constexpr ( __wordsize == 32 ) {
+        const u64 shifts[5] = { __class_precise_shift, __class_small_shift, __class_medium_shift, __class_large_shift, __class_huge_shift };
+
+        u64 shift = 63u - __builtin_clzll(Class);
+
+        f64 __denom = 0.0;
+        for ( unsigned i = 0; i < 5; ++i ) {
+          f64 w = 63.0 - f64(shifts[i]);
+          __denom += micron::math::pow(2.0, w * alpha_factor);
+        }
+        u64 denom = static_cast<u64>(__denom + 0.5);
+
+        f64 w = (63.0 - f64(shift));
+        f64 weight_fp = micron::math::pow(2.0, w * alpha_factor);
+        u64 weight = static_cast<u64>(weight_fp + 0.5);     // round to nearest integer
+
+        u64 scaled = total / denom;
+        u64 remainder = total % denom;
+
+        u64 frac = scaled * weight;
+        frac += (remainder * weight) / denom;
+        if ( frac % __system_pagesize != 0 )
+          frac += __system_pagesize - (frac % __system_pagesize);
+        return frac;
+      }
+      return __default_magic_size;
+    };
+    //
+    u64 prealloc_size = micron::math::floor<u64>(static_cast<f32>(info.totalram) * __default_prealloc_factor);
+    __debug_print("Total memory: ", info.totalram);
+    __debug_print("Memory to preallocate: ", prealloc_size);
+    __init_bucket<__class_arena_internal>(_arena_buffer, _tail_arena_buffer, (__default_arena_page_buf * __system_pagesize));
+    __init_cache<__class_precise>(_cache_buffer);     // by config inits with a 1MB buffer
+    if constexpr ( !__default_lazy_construct ) {
+      __init_bucket<__class_small>(_small_buckets, _tail_small_buckets,
+                                   __share.template operator()<__class_small>(prealloc_size));     // 1.6MB
+      __init_bucket<__class_medium>(_medium_buckets, _tail_medium_buckets,
+                                    __share.template operator()<__class_medium>(prealloc_size));     // 283KB
+      if constexpr ( __default_init_large_pages and !__is_constrained ) {
+        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets,
+                                     __share.template operator()<__class_large>(prealloc_size));     // 3.54MB
+        __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets,
+                                    __share.template operator()<__class_huge>(prealloc_size));     // 40.8MB
+      }
     }
   }
+
   __arena(const __arena &) = delete;
   __arena(__arena &&) = delete;
   __arena &operator=(const __arena &) = delete;
@@ -833,75 +897,79 @@ or thread storage duration exits via an exception, the function std::terminate i
     __debug_print("push(): ", sz);
     collect_stats<stat_type::alloc>();
     collect_stats<stat_type::total_memory_req>(sz);
+
     if ( check_constraint(sz) ) [[unlikely]]
       abort_state();
     if ( check_oom() ) [[unlikely]]
       abort_state();
+
     micron::__chunk<byte> memory;
+
     for ( u64 i = 0; i < __default_max_retries; ++i ) {
-      {
-        if ( memory = __vmap_append_tail(sz); !memory.zero() ) {
-          __debug_print("__vmap_append() alloc'd: ", memory.len);
-          zero_on_alloc(memory.ptr, memory.len);
-          sanitize_on_alloc(memory.ptr, memory.len);
-          collect_stats<stat_type::total_memory_throughput>(memory.len);
-          return memory;
+      if ( memory = __vmap_append_tail(sz); !memory.zero() ) [[likely]] {
+        __debug_print("__vmap_append() alloc'd: ", memory.len);
+        zero_on_alloc(memory.ptr, memory.len);
+        sanitize_on_alloc(memory.ptr, memory.len);
+        collect_stats<stat_type::total_memory_throughput>(memory.len);
+        return memory;
+      }
+
+      __debug_print("failed to __vmap_append(): ", sz);
+
+      if ( sz <= __class_small ) {
+        size_t __next_sz = __calculate_space_cache(__default_cache_step);
+        __debug_print("growing (cache) container with size: ", __next_sz);
+        __buf_expand_exact(sz, __next_sz);
+        continue;
+      }
+
+      if constexpr ( __is_constrained ) {
+        if ( sz >= __class_medium ) {
+          size_t __next_sz = __calculate_space_medium(sz) * __default_overcommit;
+          __predict += __next_sz;
+          __debug_print("growing (large) container with size: ", __predict.predict_size(__next_sz));
+          __buf_expand_exact(sz, __predict.predict_size(__next_sz));
+          continue;
         }
-        __debug_print("failed to __vmap_append(): ", sz);
-        if ( sz <= __class_small ) {
-          size_t __next_sz = __calculate_space_cache(__default_cache_step);
-          __debug_print("growing (cache) container with size: ", __next_sz);
-          __buf_expand_exact(sz, __next_sz);
+      }
+
+      if constexpr ( !__is_constrained ) {
+        if ( sz >= __class_medium && sz < __class_1mb ) {
+          size_t __next_sz = __calculate_space_medium(sz) * __default_overcommit;
+          __predict += __next_sz;
+          __debug_print("growing (large) container with size: ", __predict.predict_size(__next_sz));
+          __buf_expand_exact(sz, __predict.predict_size(__next_sz));
           continue;
         }
 
-        if constexpr ( !__is_constrained ) {
-          if ( sz >= __class_medium and sz < __class_1mb ) {
-            // yes, this is correct, no sep calc_spac funcs for classes between these
-            size_t __next_sz = __calculate_space_medium(sz) * __default_overcommit;
-            __predict += __next_sz;
-            __debug_print("growing (large) container with size: ", __predict.predict_size(__next_sz));
-            __buf_expand_exact(sz, __predict.predict_size(__next_sz));
-            continue;
-          }
-        } else if constexpr ( __is_constrained ) {
-          if ( sz >= __class_medium ) {
-            // yes, this is correct, no sep calc_spac funcs for classes between these
-            size_t __next_sz = __calculate_space_medium(sz) * __default_overcommit;
-            __predict += __next_sz;
-            __debug_print("growing (large) container with size: ", __predict.predict_size(__next_sz));
-            __buf_expand_exact(sz, __predict.predict_size(__next_sz));
-            continue;
-          }
-        }
-        if constexpr ( !__is_constrained ) {
-
-          if ( sz >= __class_1mb and sz < __class_gb ) {
-
-            size_t __next_sz = __calculate_space_huge(sz) * __default_overcommit;
-            __predict += __next_sz;
-            __debug_print("growing (1mb+) container with size: ", __predict.predict_size(__next_sz));
-            __buf_expand_exact(sz, __predict.predict_size(__next_sz));
-            continue;
-
-          } else if ( sz >= __class_gb ) {     // for if someone requests allocations exceeding 1gb
-
-            size_t __next_sz = __calculate_space_bulk(sz);     // don't overcommit massive multigb allocations
-            __debug_print("growing (gb+) container with size: ", __next_sz);
-            __buf_expand_exact(sz, __next_sz);
-            continue;
-          }
-        }
-        {     // for all other allocs, grow the most aggressive
-          size_t __next_sz = __calculate_space_small(sz) * __default_overcommit;
+        if ( sz >= __class_1mb && sz < __class_gb ) {
+          size_t __next_sz = __calculate_space_huge(sz) * __default_overcommit;
           __predict += __next_sz;
-          __debug_print("growing (small) container with size: ", __predict.predict_size(__next_sz));
+          __debug_print("growing (1mb+) container with size: ", __predict.predict_size(__next_sz));
           __buf_expand_exact(sz, __predict.predict_size(__next_sz));
+          continue;
+        }
+
+        if ( sz >= __class_gb ) {
+          size_t __next_sz = __calculate_space_bulk(sz);
+          __debug_print("growing (gb+) container with size: ", __next_sz);
+          __buf_expand_exact(sz, __next_sz);
+          continue;
         }
       }
+
+      // smallest allocations grow the faster
+      {
+        size_t __next_sz = __calculate_space_small(sz) * __default_overcommit;
+        __predict += __next_sz;
+        __debug_print("growing (small) container with size: ", __predict.predict_size(__next_sz));
+        __buf_expand_exact(sz, __predict.predict_size(__next_sz));
+      }
     }
+
     return { (byte *)-1, micron::numeric_limits<size_t>::max() };
   }
+
   micron::__chunk<byte>
   launder(const size_t sz)
   {
@@ -942,10 +1010,11 @@ or thread storage duration exits via an exception, the function std::terminate i
   bool
   pop(const micron::__chunk<byte> &mem)
   {
-    __debug_print("pop() address: ", mem.ptr);
+    __debug_print_addr("pop() address: ", mem.ptr);
     __debug_print("pop() size: ", mem.len);
     if ( mem.zero() )
-      return false;
+      return true;
+    // NOTE: according to the standard freeing null should succeed
     if constexpr ( __default_enforce_provenance ) {
       if ( !has_provenance(reinterpret_cast<addr_t *>(mem.ptr)) )
         return fail_state();
@@ -956,14 +1025,16 @@ or thread storage duration exits via an exception, the function std::terminate i
     zero_on_free(mem.ptr, mem.len);
     return __vmap_remove(mem);
   }
+
   bool
   pop(byte *mem)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
     // TODO: add this
     // collect_stats<stat_type::total_memory_freed>(mem.len);
-    __debug_print("pop() address: ", mem);
+    __debug_print_addr("pop() address: ", mem);
     if ( mem == nullptr )
-      return false;
+      return true;
+    // NOTE: according to the standard freeing null should succeed
     if constexpr ( __default_enforce_provenance ) {
       if ( !has_provenance(reinterpret_cast<addr_t *>(mem)) )
         return fail_state();
@@ -973,6 +1044,7 @@ or thread storage duration exits via an exception, the function std::terminate i
     zero_on_free(mem);
     return __vmap_remove_at(mem);
   }
+
   bool
   present(addr_t *mem) const
   {
@@ -980,6 +1052,7 @@ or thread storage duration exits via an exception, the function std::terminate i
       return false;
     return __vmap_locate_at(mem);
   }
+
   bool
   has_provenance(addr_t *mem) const
   {
@@ -987,10 +1060,11 @@ or thread storage duration exits via an exception, the function std::terminate i
       return false;
     return __vmap_within(mem);
   }
+
   bool
   pop(byte *mem, size_t len)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
-    __debug_print("pop() address: ", mem);
+    __debug_print_addr("pop() address: ", mem);
     if ( mem == nullptr )
       return false;
     if constexpr ( __default_enforce_provenance ) {
@@ -1000,11 +1074,12 @@ or thread storage duration exits via an exception, the function std::terminate i
     collect_stats<stat_type::total_memory_freed>(len);
     return __vmap_remove({ mem, len });
   }
+
   // tombstone pop
   bool
   ts_pop(const micron::__chunk<byte> &mem)
   {
-    __debug_print("pop() address: ", mem.ptr);
+    __debug_print_addr("pop() address: ", mem.ptr);
     __debug_print("pop() size: ", mem.len);
     if ( mem.zero() )
       return false;
@@ -1018,10 +1093,11 @@ or thread storage duration exits via an exception, the function std::terminate i
     zero_on_free(mem.ptr, mem.len);
     return __vmap_tombstone(mem);
   }
+
   bool
   ts_pop(byte *mem)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
-    __debug_print("pop() address: ", mem);
+    __debug_print_addr("pop() address: ", mem);
     // TODO: add this
     // collect_stats<stat_type::total_memory_freed>(mem.len);
     if ( mem == nullptr )
@@ -1035,6 +1111,7 @@ or thread storage duration exits via an exception, the function std::terminate i
     zero_on_free(mem);
     return __vmap_tombstone_at(mem);
   }
+
   bool
   ts_pop(byte *mem, size_t len)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
@@ -1047,6 +1124,7 @@ or thread storage duration exits via an exception, the function std::terminate i
     collect_stats<stat_type::total_memory_freed>(len);
     return __vmap_tombstone({ mem, len });
   }
+
   bool
   freeze(const micron::__chunk<byte> &mem)
   {
@@ -1058,6 +1136,7 @@ or thread storage duration exits via an exception, the function std::terminate i
     }
     return __vmap_freeze(mem);
   }
+
   bool
   freeze(byte *mem)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
@@ -1069,6 +1148,7 @@ or thread storage duration exits via an exception, the function std::terminate i
     }
     return __vmap_freeze_at(mem);
   }
+
   bool
   freeze(byte *mem, size_t len)     // need to support popping memory by addr only, will be slower due to req. lookup
   {
@@ -1092,6 +1172,25 @@ or thread storage duration exits via an exception, the function std::terminate i
     total += __for_each_bckt(_huge_buckets, [](sheet<__class_huge> *const v) -> size_t { return v->allocated(); });
     return total;
   }
+
+  template <u64 Sz>
+  size_t
+  total_usage_of_class(void) const
+  {
+    if constexpr ( Sz == __class_precise ) {
+      return __for_each_bckt(_cache_buffer, [](sheet<__class_precise> *const v) -> size_t { return v->allocated(); });
+    } else if constexpr ( Sz == __class_small ) {
+      return __for_each_bckt(_small_buckets, [](sheet<__class_small> *const v) -> size_t { return v->allocated(); });
+    } else if constexpr ( Sz == __class_medium ) {
+      return __for_each_bckt(_medium_buckets, [](sheet<__class_medium> *const v) -> size_t { return v->allocated(); });
+    } else if constexpr ( Sz == __class_large ) {
+      return __for_each_bckt(_large_buckets, [](sheet<__class_large> *const v) -> size_t { return v->allocated(); });
+    } else if constexpr ( Sz == __class_huge ) {
+      return __for_each_bckt(_huge_buckets, [](sheet<__class_huge> *const v) -> size_t { return v->allocated(); });
+    }
+    return 0;
+  }
+
   void
   reset_page(byte *ptr)
   {
@@ -1103,7 +1202,7 @@ or thread storage duration exits via an exception, the function std::terminate i
         }
         auto &sh = *nd->nd;     // safe
 
-        if ( sh.is_at(micron::real_addr(__ptr)) ) [[unlikely]]
+        if ( sh.is_at(reinterpret_cast<addr_t *>(__ptr)) ) [[unlikely]]
           sh.reset();
         nd = nd->nxt;
       }
@@ -1115,11 +1214,13 @@ or thread storage duration exits via an exception, the function std::terminate i
     __for_each_bckt_void(_large_buckets, check, ptr);
     __for_each_bckt_void(_huge_buckets, check, ptr);
   }
+
   size_t
   __available_buffer(void) const
   {
     return _arena_memory.available();
   }
+
   size_t
   __size_of_alloc(addr_t *addr) const
   {
@@ -1149,6 +1250,14 @@ or thread storage duration exits via an exception, the function std::terminate i
       return __class_huge << order_class;
     }
     return 0;
+  }
+
+  bool
+  zeroed(void) const
+  {
+    if ( _cache_buffer.nd == nullptr and _cache_buffer.nxt == nullptr )
+      return true;
+    return false;
   }
 };
 };

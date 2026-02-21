@@ -21,77 +21,79 @@
 
 #pragma once
 
-#include <micron/array/arrays.hpp>
 #include "config.hpp"
+#include <micron/array/arrays.hpp>
 
 namespace abc
 {
 constexpr static const u64 __max_cached = 32;
+
 class alloc_predictor
 {
+  // Keep sum and div maintained incrementally instead of recomputing each time
   micron::carray<size_t, __max_cached> allocs;
-  size_t index;
+  u64 running_sum;
+  u64 running_div;     // count of non-zero entries
+  u32 index;
 
-  u64
-  of_class(const size_t sz) const
+  static constexpr size_t
+  align_to_page(const size_t n) noexcept
   {
-    if ( sz < __class_small )
-      return __class_precise;
-    else if ( sz < __class_medium and sz >= __class_small )
-      return __class_small;
-    else if ( sz < __class_large and sz >= __class_medium )
-      return __class_medium;
-    else if ( sz < __class_huge and sz >= __class_large )
-      return __class_large;
-    else if ( sz < __class_gb and sz >= __class_1mb )
-      return __class_1mb;
-    else
-      return __class_gb;
+    return (n + __system_pagesize - 1) & ~(size_t(__system_pagesize) - 1);
+  }
+
+  [[nodiscard]] inline u64
+  of_class(const size_t sz) const noexcept
+  {
+    return (sz < __class_small)    ? __class_precise
+           : (sz < __class_medium) ? __class_small
+           : (sz < __class_large)  ? __class_medium
+           : (sz < __class_1mb)    ? __class_large
+           : (sz < __class_gb)     ? __class_1mb
+                                   : __class_gb;
   }
 
 public:
   ~alloc_predictor() = default;
-  alloc_predictor(void) = default;
+
+  alloc_predictor() noexcept : allocs{}, running_sum(0), running_div(0), index(0) {}
+
   alloc_predictor(const alloc_predictor &) = default;
   alloc_predictor(alloc_predictor &&) = default;
-  alloc_predictor &
-  operator+=(const size_t n)
+  alloc_predictor &operator=(const alloc_predictor &) = default;
+  alloc_predictor &operator=(alloc_predictor &&) = default;
+
+  inline alloc_predictor &
+  operator+=(const size_t n) noexcept
   {
-    allocs[index++] = n;
-    if ( index >= __max_cached ) [[unlikely]]
-      index = 0;
+    const u32 i = index;
+
+    const size_t old = allocs[i];
+    running_sum -= old;
+    running_div -= (old != 0);
+
+    allocs[i] = n;
+    running_sum += n;
+    running_div += (n != 0);
+
+    index = (i + 1) & (__max_cached - 1);
+
     return *this;
   }
 
-  inline size_t
-  predict_size(const size_t n) const
+  [[nodiscard]] inline size_t
+  predict_size(const size_t n) const noexcept
   {
-    u64 sum = 0;
-    u64 div = 0;
-    for ( size_t i = 0; i < __max_cached; i += 4 ) {
-      sum += allocs[i];
-      sum += allocs[i + 1];
-      sum += allocs[i + 2];
-      sum += allocs[i + 3];
-      if ( allocs[i] )
-        ++div;
-      if ( allocs[i + 1] )
-        ++div;
-      if ( allocs[i + 2] )
-        ++div;
-      if ( allocs[i + 3] )
-        ++div;
-    }
-    size_t mean_alloc = sum / div;
+    if ( __builtin_expect(running_div == 0, 0) )
+      return align_to_page(n);
 
-    if ( mean_alloc == 0 )
-      return n;
-    if ( n > mean_alloc * 3 )
-      return n;
-    if ( of_class(n) != of_class(mean_alloc) ) {
-      return n;
+    const size_t mean_alloc = running_sum / running_div;
+
+    if ( mean_alloc == 0 || n > mean_alloc * 3 || of_class(n) != of_class(mean_alloc) ) {
+      return align_to_page(n);
     }
-    return mean_alloc;
+
+    return align_to_page(mean_alloc > n ? mean_alloc : n);
   }
 };
 };

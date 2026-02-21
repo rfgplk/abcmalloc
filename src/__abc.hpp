@@ -23,7 +23,7 @@
 
 #include <micron/types.hpp>
 
-#include  <micron/allocation/linux/kmemory.hpp>
+#include <micron/allocation/kmemory.hpp>
 
 #include <micron/except.hpp>
 #include <micron/type_traits.hpp>
@@ -41,15 +41,16 @@ struct __abc_allocator {
   {
     auto mem = abc::fetch(n);
     if ( mem.ptr == (void *)-1 )
-      throw micron::except::memory_error("abc_allocator::alloc(): mmap() failed");
+      micron::exc<micron::except::memory_error>("abc_allocator::alloc(): mmap() failed");
     return mem;
   };
+
   static T *
   alloc(size_t n)     // allocate 'smartly'
   {
     T *ptr = abc::alloc(n);
     if ( ptr == (void *)-1 )
-      throw micron::except::memory_error("abc_allocator::alloc(): mmap() failed");
+      micron::exc<micron::except::memory_error>("abc_allocator::alloc(): mmap() failed");
     return ptr;
   };
 
@@ -57,7 +58,7 @@ struct __abc_allocator {
   dealloc(T *mem, size_t len)
   {     // deallocate at location N
     if ( mem == nullptr )
-      throw micron::except::memory_error("abc_allocator::dealloc(): nullptr was provided");
+      micron::exc<micron::except::memory_error>("abc_allocator::dealloc(): nullptr was provided");
     abc::dealloc(mem, len);
     mem = nullptr;
   }

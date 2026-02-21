@@ -9,6 +9,7 @@ abcmalloc is a c++23 memory allocator designed to deliver best-in-class performa
 
 </div>
 
+![Version](https://img.shields.io/badge/version-0.9.0-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++23](https://img.shields.io/badge/C++-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 
@@ -58,6 +59,11 @@ Features
  - supports both per-thread and global lock allocation modes
  - immutable mode enabled via laundering
 
+Releases
+------------
+- v0.9 - overhauled tapi and config parameters, added LD_PRELOAD and static lib compilation support, fixed size prediction, and added a better memory initialization model
+
+
 Is This Usable Out of the Box?
 ------------------------------
 
@@ -82,6 +88,13 @@ Performance Metrics
 - provides consistent memory allocation latency across workloads.
 - on average, **15–20% higher throughput** compared to contemporary high-performance allocators.
 - primarily optimized for workstation environments (16-256gb of working physical memory), configurable for embedded machines
+
+
+Benchmarks
+-----------
+
+Config Options
+----------
 
 Use Cases
 ----------

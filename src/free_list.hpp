@@ -40,19 +40,21 @@ constexpr static const uintptr_t __flag_out_of_space = -2;
 constexpr static const uintptr_t __flag_tombstoned = -3;
 
 template <typename T, i64 Min, i32 Mx = 64>
-  requires(micron::is_trivially_constructible_v<T> and micron::is_trivially_destructible_v<T>
-           and (bool)((Min & (Min - 1)) == 0))
+  requires(micron::is_trivially_constructible_v<T> and micron::is_trivially_destructible_v<T> and (bool)((Min & (Min - 1)) == 0))
 struct __buddy_list {
   struct free_block {
     free_block *next;
   };
+
   // size_t min_block;
   byte *base;
   size_t total;
   i64 max_order;
   size_t allocated_bytes;
+  size_t tombstoned_bytes;
   free_block *free_lists[Mx];     // on the stack
   free_block *active[Mx];
+
   void
   __impl_init_memory(byte *_ptr, size_t _len)
   {
@@ -83,30 +85,37 @@ struct __buddy_list {
     free_lists[max_order - 1] = (free_block *)base;
     free_lists[max_order - 1]->next = nullptr;
   }
+
   ~__buddy_list() noexcept = default;
   __buddy_list(void) = delete;
+
   //__buddy_list(void *mem, size_t bytes) noexcept : base(nullptr), total(0), max_order(0)
-  __buddy_list(const T &mem) noexcept : base(nullptr), total(0), max_order(0), allocated_bytes(0)
+  __buddy_list(const T &mem) noexcept : base(nullptr), total(0), max_order(0), allocated_bytes(0), tombstoned_bytes(0)
   {
     if ( mem.zero() or mem.len < Min )
       micron::abort();
     __impl_init_memory(mem.ptr, mem.len);
   }
+
   __buddy_list(const __buddy_list &) = delete;
+
   __buddy_list(__buddy_list &&o)
-      : base(o.base), total(o.total), max_order(o.max_order), allocated_bytes(o.allocated_bytes)
+      : base(o.base), total(o.total), max_order(o.max_order), allocated_bytes(o.allocated_bytes), tombstoned_bytes(o.tombstoned_bytes)
   {
     o.base = nullptr;
     o.total = 0;
     o.max_order = 0;
     o.allocated_bytes = 0;
+    o.tombstoned_bytes = 0;
 
     for ( i64 i = 0; i < max_order; ++i ) {
       free_lists[i] = o.free_lists[i];
       o.free_lists[i] = nullptr;
     }
   }
+
   __buddy_list &operator=(const __buddy_list &) = delete;
+
   __buddy_list &
   operator=(__buddy_list &&o)
   {
@@ -114,30 +123,35 @@ struct __buddy_list {
     total = o.total;
     max_order = o.max_order;
     allocated_bytes = o.allocated_bytes;
+    tombstoned_bytes = o.tombstoned_bytes;
 
     o.base = nullptr;
     o.total = 0;
     o.max_order = 0;
     o.allocated_bytes = 0;
+    o.tombstoned_bytes = 0;
     for ( i64 i = 0; i < max_order; ++i ) {
       free_lists[i] = o.free_lists[i];
       o.free_lists[i] = nullptr;
     }
     return *this;
   }
+
   static inline int
-  ceil_log2_u64(uint64_t v) noexcept
+  ceil_log2_u64(u64 v) noexcept
   {
     if ( v <= 1 )
       return 0;
     return 64 - __builtin_clzll(v - 1);
   }
+
   inline int
   order_for_size(size_t n) const noexcept
   {
     size_t units = (n + Min - 1) / Min;
     return ceil_log2_u64(units);
   }
+
   inline size_t
   order_size(i64 o) const noexcept
   {
@@ -182,6 +196,7 @@ struct __buddy_list {
     // leeway. the offset is 256-bit to account properly for AVX2.
     return { ((byte *)blk + __hdr_offset), order_size(i) - __hdr_offset };
   }
+
   T
   temporal_allocate(size_t n) noexcept
   {
@@ -229,6 +244,7 @@ struct __buddy_list {
 
     return { ((byte *)blk + __hdr_offset), target_size - __hdr_offset };
   }
+
   T
   allocate_exact(size_t n) noexcept
   {
@@ -252,6 +268,7 @@ struct __buddy_list {
     // leeway. the offset is 256-bit to account properly for AVX2.
     return { ((byte *)blk + __hdr_offset), order_size(o) - __hdr_offset };
   }
+
   ret_flag
   tombstone(byte *ptr) noexcept
   {
@@ -264,9 +281,11 @@ struct __buddy_list {
     if ( o < 0 || o >= max_order )
       return { __flag_invalid };
     allocated_bytes -= order_size(o);
+    tombstoned_bytes += order_size(o);
 
     return __flag_tombstoned;
   }
+
   ret_flag
   tombstone(T &node) noexcept
   {
@@ -274,6 +293,7 @@ struct __buddy_list {
       return __flag_invalid;
     return tombstone(node.ptr);
   }
+
   bool
   is_tombstoned(byte *ptr) noexcept
   {
@@ -342,6 +362,7 @@ struct __buddy_list {
       return __flag_invalid;
     return deallocate(node.ptr);
   }
+
   T
   reallocate(T node, size_t new_size) noexcept
   {
@@ -374,11 +395,25 @@ struct __buddy_list {
       return 0;
     return total - allocated_bytes;
   }
+
+  size_t
+  __total() const noexcept
+  {
+    return total;
+  }
+
+  size_t
+  tombstoned() const noexcept
+  {
+    return tombstoned_bytes;
+  }
+
   size_t
   used() const noexcept
   {
     return allocated_bytes;
   }
+
   size_t
   block_size(byte *ptr) const noexcept
   {
@@ -394,6 +429,7 @@ struct __buddy_list {
     }
     return 0;
   }
+
   bool
   is_allocated(byte *ptr) const noexcept
   {

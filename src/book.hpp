@@ -21,14 +21,14 @@
 
 #pragma once
 
+#include "config.hpp"
+#include "free_list.hpp"
+#include "hooks.hpp"
+#include <micron/allocation/kmemory.hpp>
 #include <micron/control.hpp>
 #include <micron/except.hpp>
 #include <micron/memory/addr.hpp>
 #include <micron/types.hpp>
-#include <micron/allocation/linux/kmemory.hpp>
-#include "config.hpp"
-#include "free_list.hpp"
-#include "hooks.hpp"
 
 namespace abc
 {
@@ -40,16 +40,18 @@ template <u64 Sz> class sheet
   using stack_page_list = __buddy_list<micron::__chunk<byte>, __size_class, 64>;
   micron::__chunk<byte> __kernel_memory;
   stack_page_list __book;
+  size_t __guard_offset;
+
   // when a new malloc happens insert it into the book
 
   inline __attribute__((always_inline)) void
   __impl_release(void)
   {
     if ( !__kernel_memory.zero() ) {
-      if ( micron::munmap(micron::real_addr(__kernel_memory.ptr), __kernel_memory.len) == -1 ) {
+      if ( micron::munmap(reinterpret_cast<addr_t *>(__kernel_memory.ptr), __kernel_memory.len) == -1 ) {
         micron::abort();
       }
-      // throw micron::except::memory_error("abcmalloc ~sheet(): failed to unmap memory");
+      // exc<except::memory_error>("abcmalloc ~sheet(): failed to unmap memory");
       __kernel_memory.ptr = nullptr;
       __kernel_memory.len = 0;
     }
@@ -57,18 +59,36 @@ template <u64 Sz> class sheet
 
 public:
   ~sheet() { __impl_release(); };
+
   sheet(void) = delete;
-  sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem) {}
+
+  sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0) {}
+
+  // for guard pages
+  sheet(const micron::__chunk<byte> &mem, size_t offset)
+      : __kernel_memory(mem), __book(micron::__chunk<byte>{ mem.ptr, mem.len - offset }), __guard_offset(offset)
+  {
+  }
+
   sheet(const sheet &) = delete;
-  sheet(sheet &&o) : __kernel_memory(micron::move(o.__kernel_memory)), __book(micron::move(o.__book)) {}
+
+  sheet(sheet &&o) : __kernel_memory(micron::move(o.__kernel_memory)), __book(micron::move(o.__book)), __guard_offset(o.__guard_offset)
+  {
+    o.__guard_offset = 0;
+  }
+
   sheet &operator=(const sheet &) = delete;
+
   sheet &
   operator=(sheet &&o)
   {
     __kernel_memory = micron::move(o.__kernel_memory);
     __book = micron::move(o.__book);
+    __guard_offset = o.__guard_offset;
+    o.__guard_offset = 0;
     return *this;
   }
+
   bool
   freeze(void)
   {
@@ -77,6 +97,7 @@ public:
     }
     return true;
   }
+
   bool
   freeze(int prot)
   {
@@ -85,16 +106,19 @@ public:
     }
     return true;
   }
+
   void
   release(void)
   {
     __impl_release();
   }
+
   bool
   empty(void) const noexcept
   {
     return __kernel_memory.zero();
   }
+
   // request to allocate mem of sz, fail silently (return nullptr)
   micron::__chunk<byte>
   mark(size_t mem_sz)
@@ -106,6 +130,7 @@ public:
       return { nullptr, 0 };
     return _p;
   }
+
   // allows marking at existing location
   micron::__chunk<byte>
   temporal_mark(size_t mem_sz)
@@ -117,6 +142,7 @@ public:
       return { nullptr, 0 };
     return _p;
   }
+
   // request to allocate mem of sz, fail loudly, force quote
   micron::__chunk<byte>
   try_mark(size_t mem_sz)
@@ -145,6 +171,7 @@ public:
       return false;
     return true;
   }
+
   bool
   try_tombstone(micron::__chunk<byte> _p)
   {
@@ -159,6 +186,7 @@ public:
       return false;
     return true;
   }
+
   bool
   try_unmark_no_size(byte *_p)
   {
@@ -169,6 +197,7 @@ public:
     __book.deallocate(_p);
     return true;
   }
+
   // deprecated technically
   bool
   try_tombstone_no_size(byte *_p)
@@ -180,6 +209,7 @@ public:
     __book.tombstone(_p);
     return true;
   }
+
   bool
   find(byte *_p)
   {
@@ -191,6 +221,7 @@ public:
       micron::abort();
     return !__book.is_tombstoned(_p);
   }
+
   size_t
   available() const
   {
@@ -198,26 +229,52 @@ public:
       return 0;
     return __book.available();
   }
+
+  size_t
+  total() const
+  {
+    if ( empty() )
+      return 0;
+    return __book.__total();
+  }
+
+  // to be used in loops where sheet is always allocd
+  size_t
+  ftotal() const
+  {
+    return __book.__total();
+  }
+
   size_t
   used() const
   {
     return __book.used();
   }
+
+  size_t
+  tombstoned() const
+  {
+    return __book.tombstoned();
+  }
+
   size_t
   allocated() const
   {
-    return __kernel_memory.len;
+    return __kernel_memory.len - __guard_offset;
   }
+
   addr_t *
   addr() const
   {
     return reinterpret_cast<addr_t *>(__kernel_memory.ptr);
   }
+
   addr_t *
   addr_end() const
   {
-    return reinterpret_cast<addr_t *>(__kernel_memory.ptr + __kernel_memory.len);
+    return reinterpret_cast<addr_t *>(__kernel_memory.ptr + __kernel_memory.len - __guard_offset);
   }
+
   bool
   is_at(addr_t *_addr) const
   {
@@ -225,6 +282,7 @@ public:
       return true;
     return false;
   }
+
   void
   reset(void)
   {

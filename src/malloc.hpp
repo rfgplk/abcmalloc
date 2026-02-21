@@ -18,13 +18,16 @@
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 #pragma once
 
-#include <micron/type_traits.hpp>
-#include <micron/types.hpp>
+#include "version.hpp"
+
 #include "arena.hpp"
 #include "tapi.hpp"
+#include <micron/type_traits.hpp>
+#include <micron/types.hpp>
+
+#include <micron/except.hpp>
 
 namespace abc
 {
@@ -35,12 +38,12 @@ namespace abc
 bool
 is_present(addr_t *ptr)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     return __main_arena->present(ptr);
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   return __main_arena->present(ptr);
 }
 
@@ -52,14 +55,26 @@ is_present(byte *ptr)
 
 // checks if pointer is addressable at any known page of the allocator, if it is it's valid
 bool
+within(const addr_t *ptr)
+{
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
+    [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
+    __start_abcmalloc_init();
+    return __main_arena->has_provenance(const_cast<addr_t *>(ptr));
+  }
+  __start_abcmalloc_init();
+  return __main_arena->has_provenance(const_cast<addr_t *>(ptr));
+}
+
+bool
 within(addr_t *ptr)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     return __main_arena->has_provenance(ptr);
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   return __main_arena->has_provenance(ptr);
 }
 
@@ -68,16 +83,17 @@ within(byte *ptr)
 {
   return within(reinterpret_cast<addr_t *>(ptr));
 }
+
 void
 relinquish(byte *ptr)     // unmaps entire sheet at which ptr lives, resets arena entirely (NOTE: this will
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     __main_arena->reset_page(ptr);
     return;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   __main_arena->reset_page(ptr);
 }
 
@@ -87,24 +103,24 @@ byte *unmark_at(byte *ptr, size_t size);     // hard unmark memory at addr. over
 micron::__chunk<byte>
 balloc(size_t size)     // allocates memory, returns entire memory chunk
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     return __main_arena->push(size);
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   return __main_arena->push(size);
 }
 
 micron::__chunk<byte>
 fetch(size_t size)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     return __main_arena->push(size);
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   return __main_arena->push(size);
 }
 
@@ -113,14 +129,14 @@ template <typename T>
 T *
 fetch(void)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     auto mem = __main_arena->push(sizeof(T));
     T *__obj = reinterpret_cast<T *>(mem.ptr);
     return __obj;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   auto mem = __main_arena->push(sizeof(T));
   T *__obj = reinterpret_cast<T *>(mem.ptr);
   return __obj;
@@ -129,16 +145,17 @@ fetch(void)
 void
 retire(byte *ptr)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     if ( __main_arena->ts_pop(ptr) ) {
-
+      micron::exc<micron::except::memory_error>("retirr(): wasn't able to free memory");
     }     // wasn't able to throw, add an error
     return;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   if ( __main_arena->ts_pop(ptr) ) {
+    micron::exc<micron::except::memory_error>("retirr(): wasn't able to free memory");
   }     // wasn't able to throw, add an error
 }
 
@@ -152,50 +169,57 @@ alloc(size_t size) -> byte *     // allocates memory, near iden. func. to malloc
 }
 
 __attribute__((malloc, alloc_size(1))) byte *salloc(size_t size);     // applies policies from harden
+
 void
 dealloc(byte *ptr)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
-    if ( __main_arena->pop(ptr) ) {
-
-    }     // wasn't able to throw, add an error
+    __start_abcmalloc_init();
+    if ( !__main_arena->pop(ptr) ) {
+      // WARNING:: due to poor interop with missing the STL and micron, there are edge cases where global objects constructed by glibc might
+      // be invoked through *this* dealloc, instead of the libc free() one. meaning we will already have freed all of our memory. simply
+      // fail out silently
+      micron::exc<micron::except::memory_error>("dealloc(): wasn't able to free memory");
+    }
     return;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   if ( !__main_arena->pop(ptr) ) {
-  }     // wasn't able to throw, add an error
+    micron::exc<micron::except::memory_error>("dealloc(): wasn't able to free memory");
+  }
 }
 
 void
 dealloc(byte *ptr, size_t len)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     if ( !__main_arena->pop({ ptr, len }) ) {
+      micron::exc<micron::except::memory_error>("dealloc(): wasn't able to free memory");
 
     }     // wasn't able to throw, add an error
     return;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   if ( !__main_arena->pop({ ptr, len }) ) {
+    micron::exc<micron::except::memory_error>("dealloc(): wasn't able to free memory");
   }     // wasn't able to throw, add an error
 }
 
 void
 freeze(byte *ptr)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     if ( __main_arena->freeze(ptr) ) {
 
     }     // wasn't able to throw, add an error
     return;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   if ( __main_arena->freeze(ptr) ) {
   }
 }
@@ -208,84 +232,110 @@ which(void)
 }
 
 void borrow();     //
+
 __attribute__((malloc, alloc_size(1))) byte *
 launder(size_t size)
 {
-  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), micron::unique_lock<micron::lock_starts::locked>> ) {
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
     [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
-    __init_abcmalloc();
+    __start_abcmalloc_init();
     return __main_arena->launder(size).ptr;
   }
-  __init_abcmalloc();
+  __start_abcmalloc_init();
   return __main_arena->launder(size).ptr;
 }
+
 template <typename T>
 size_t
 query_size(T *ptr)
 {
-  return __main_arena->__size_of_alloc(reinterpret_cast<addr_t*>(ptr));
+  return __main_arena->__size_of_alloc(reinterpret_cast<addr_t *>(ptr));
 }
 
-//
-// LEGACY STDLIB FUNCTIONS START HERE
-//
-//
-//
-// main functions retained for backwards compatibility with the c stdlib
-// even those these are fully functional, they aren't intended to be called as the de facto standard allocating fn's
-
 // leave these as void*
+// launder()
+// query
+// inject
+// make_at
+
+size_t
+musage(void)
+{
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
+    [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
+    __start_abcmalloc_init();
+    return __main_arena->total_usage();
+  }
+  __start_abcmalloc_init();
+  return __main_arena->total_usage();
+}
+
+template <u64 Sz>
+size_t
+musage(void)
+{
+  if constexpr ( micron::is_same_v<decltype(__guard_abcmalloc()), __abcmalloc_locktype> ) {
+    [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
+    __start_abcmalloc_init();
+    return __main_arena->total_usage_of_class<Sz>();
+  }
+  __start_abcmalloc_init();
+  return __main_arena->total_usage_of_class<Sz>();
+}
+
 __attribute__((malloc, alloc_size(1))) void *
 malloc(size_t size)     // alloc memory of size 'size', prefer using alloc
 {
-  return reinterpret_cast<void *>(alloc(size));
+  return reinterpret_cast<void *>(abc::alloc(size));
 }
+
 void *
 calloc(size_t num, size_t size)     // alloc's zero'd out memory, prefer using salloc()
 {
   if ( size != 0 && (size * num) / size != num )
     return nullptr;
 
-  byte *mem = alloc(size * num);
+  byte *mem = abc::alloc(size * num);
   if ( !mem )
     return nullptr;
   micron::zero(mem, size * num);
   return mem;
 }
+
 void *
 realloc(void *ptr, size_t size)     // reallocates memory
 {
   // NOTE: this always gets the full size of the allocated memory, not what was requested
-  size_t old_size = query_size(reinterpret_cast<addr_t*>(ptr));
+  size_t old_size = abc::query_size(reinterpret_cast<addr_t *>(ptr));
   if ( size == 0 ) {
-    dealloc(reinterpret_cast<byte *>(ptr));
+    abc::dealloc(reinterpret_cast<byte *>(ptr));
     return nullptr;
   }
 
   if ( !ptr ) {
-    return reinterpret_cast<void *>(alloc(size));
+    return reinterpret_cast<void *>(abc::alloc(size));
   }
 
-  byte *new_block = alloc(size);
+  byte *new_block = abc::alloc(size);
   if ( !new_block )
     return nullptr;     // allocation failed
 
   size_t copy_size = old_size < size ? old_size : size;
-  micron::memcpy(new_block, reinterpret_cast<byte*>(ptr), copy_size);
+  micron::memcpy(new_block, reinterpret_cast<byte *>(ptr), copy_size);
 
-  dealloc(reinterpret_cast<byte *>(ptr));
+  abc::dealloc(reinterpret_cast<byte *>(ptr));
 
   return new_block;
 }
 
 void
-free(void *ptr)     // frees memory, prefer dealloc always
+free(void *ptr)     // frees memory, prefer abc::dealloc always
 {
-  dealloc(reinterpret_cast<byte *>(ptr));
+  abc::dealloc(reinterpret_cast<byte *>(ptr));
 }
+
 void *aligned_alloc(size_t alignment, size_t size);
-// launder()
-// query
-// inject
-// make_at
+
 };
+
+#include "malloc-c.hpp"

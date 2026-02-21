@@ -22,49 +22,60 @@
 
 #include "arena.hpp"
 
+#include <micron/bits/__pause.hpp>
+
 #include <micron/mutex/locks.hpp>
-#include <micron/mutex/mutex.hpp>
 
 // main thread-specific api functions go here
 // all external code (non-test) calling abcmalloc code should go through here
 
-#include <iostream>
-
 namespace abc
 {
-micron::mutex __global_mutex;
+enum abc_state : u32 { __abc_unloaded = 0, __abc_loading, __abc_ready };
+
+static micron::atomic_token<u32> __global_abc_state{ __abc_unloaded };
+static micron::atomic_flag __global_abc_mtx{};
+// micron::mutex __global_mutex;
 static bool __abcmalloc_init = false;
 static __arena *__main_arena = nullptr;
 
-__attribute__((noinline))
-void __thread_init(void){
-}
+using __abcmalloc_locktype = micron::free_guard<>;
 
-// global construction
-// NOTE: attr constructor will fire after zero-initialization of all static variables, but BEFORE dynamic init. of all
-// objects
-// second note, the 101 is of utmost importance, since there are a few other constructor attr. declared functions within
-// micron (notably io & threading). with default prior the functions which were declared first will fire first, leaving
-// the global __main_arena uninit and segfaulting
-inline __attribute__((constructor(101))) void
-__global_abcmalloc_start(void)
+constexpr inline __attribute__((always_inline)) auto
+__guard_abcmalloc(void)
 {
-  if constexpr ( __default_global_instance and __default_construct_on_start ) {
-    thread_local static __arena local_arena;
-    __main_arena = &local_arena;
-    __abcmalloc_init = true;
+  if constexpr ( __default_multithread_safe == true ) {
+    __abcmalloc_locktype __guard(__global_abc_mtx, micron::adopt_lock);
+    return __guard;
+  } else if constexpr ( __default_multithread_safe == false ) {
+    return 0;
   }
 }
 
-inline __attribute__((destructor(65535))) void
-__global_abcmalloc_finish(void)
+static inline __arena *
+__start_abcmalloc_init(void)
 {
-  if constexpr ( __default_global_instance ) {
-    __abcmalloc_init = false;
-    __main_arena = nullptr;
+  // micron::free_guard<> guard(__global_abc_mtx, micron::adopt_lock);
+  [[maybe_unused]] auto __lock = micron::move(__guard_abcmalloc());
+  u32 state = __global_abc_state.get(micron::memory_order_acquire);
+  if ( state == __abc_ready ) [[likely]]
+    return __main_arena;
+  if ( state == __abc_unloaded ) {
+    u32 exp = 0;
+    if ( __global_abc_state.compare_exchange_strong(exp, __abc_loading, micron::memory_order::acq_rel) ) {
+      static __arena local_arena;
+      __main_arena = &local_arena;
+      __abcmalloc_init = true;
+      __global_abc_state.store(__abc_ready, micron::memory_order_release);
+      return __main_arena;
+    }
   }
+  while ( __global_abc_state.get(micron::memory_order_acquire) != __abc_ready )
+    __cpu_pause();
+  return __main_arena;
 }
 
+/*
 // initialize abcmalloc, once per thread
 inline __attribute__((always_inline)) void
 __init_abcmalloc(void)
@@ -87,5 +98,5 @@ __guard_abcmalloc(void)
   } else if constexpr ( __default_multithread_safe == false ) {
     return 0;
   }
-}
+}*/
 };

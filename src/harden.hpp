@@ -34,13 +34,14 @@ fail_state(void)
   }
   return true;
 }
+
 #pragma GCC diagnostic pop
 
 inline __attribute__((always_inline)) auto
 check_constraint(const size_t sz) -> bool
 {
   if constexpr ( __is_constrained ) {
-    if ( sz > __alloc_limit )
+    if ( sz > __alloc_limit and __alloc_limit != 0 )
       return true;
   }
   return false;
@@ -57,6 +58,7 @@ sanitize_on_alloc(byte *addr, size_t sz = 0)
     micron::memset(addr, __default_sanitize_with_on_alloc, sz);
   }
 }
+
 inline __attribute__((always_inline)) void
 zero_on_alloc(byte *addr, size_t sz = 0)
 {
@@ -92,5 +94,4 @@ full_on_free(byte *addr, size_t sz = 0)
     micron::memset(addr, 0xFF, sz);
   }
 }
-// TODO: add page guards and protected memory later
 };
