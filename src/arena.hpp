@@ -43,6 +43,14 @@
 
 #include "printing.hpp"
 
+template <typename P>
+void *
+operator new(size_t size, P *ptr)
+{
+  (void)size;
+  return ptr;
+}
+
 namespace abc
 {
 class __arena : private cache
