@@ -199,7 +199,7 @@ class __arena : private cache
 
     if ( class_sz <= __class_huge ) {
       if ( _large_buckets.nd == nullptr ) [[unlikely]]
-        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets);
+        __init_bucket<__class_large>(_large_buckets, _tail_large_buckets, exact_sz);
       else
         __expand_bucket<__class_large>(&_large_buckets, _tail_large_buckets, exact_sz);
       return;
@@ -207,7 +207,7 @@ class __arena : private cache
 
     // class_sz > __class_huge
     if ( _huge_buckets.nd == nullptr ) [[unlikely]]
-      __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets);
+      __init_bucket<__class_huge>(_huge_buckets, _tail_huge_buckets, exact_sz);
     else
       __expand_bucket<__class_huge>(&_huge_buckets, _tail_huge_buckets, exact_sz);
   }
