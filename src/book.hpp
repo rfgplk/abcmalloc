@@ -21,13 +21,13 @@
 
 #pragma once
 
+#include "cache_list.hpp"
 #include "config.hpp"
 #include "free_list.hpp"
 #include "hooks.hpp"
-#include <micron/allocation/kmemory.hpp>
-#include <micron/control.hpp>
 #include <micron/except.hpp>
 #include <micron/memory/addr.hpp>
+#include <micron/memory/allocation/kmemory.hpp>
 #include <micron/types.hpp>
 
 namespace abc
@@ -40,7 +40,7 @@ template <u64 Sz> class sheet
   using stack_page_list = __buddy_list<micron::__chunk<byte>, __size_class, 64>;
   micron::__chunk<byte> __kernel_memory;
   stack_page_list __book;
-  size_t __guard_offset;
+  usize __guard_offset;
 
   // when a new malloc happens insert it into the book
 
@@ -65,7 +65,7 @@ public:
   sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0) {}
 
   // for guard pages
-  sheet(const micron::__chunk<byte> &mem, size_t offset)
+  sheet(const micron::__chunk<byte> &mem, usize offset)
       : __kernel_memory(mem), __book(micron::__chunk<byte>{ mem.ptr, mem.len - offset }), __guard_offset(offset)
   {
   }
@@ -121,7 +121,7 @@ public:
 
   // request to allocate mem of sz, fail silently (return nullptr)
   micron::__chunk<byte>
-  mark(size_t mem_sz)
+  mark(usize mem_sz)
   {
     if ( empty() )
       return { nullptr, 0 };
@@ -133,7 +133,7 @@ public:
 
   // allows marking at existing location
   micron::__chunk<byte>
-  temporal_mark(size_t mem_sz)
+  temporal_mark(usize mem_sz)
   {
     if ( empty() )
       return { nullptr, 0 };
@@ -145,7 +145,7 @@ public:
 
   // request to allocate mem of sz, fail loudly, force quote
   micron::__chunk<byte>
-  try_mark(size_t mem_sz)
+  try_mark(usize mem_sz)
   {
     if ( empty() )
       micron::abort();
@@ -222,7 +222,7 @@ public:
     return !__book.is_tombstoned(_p);
   }
 
-  size_t
+  usize
   available() const
   {
     if ( empty() )
@@ -230,7 +230,7 @@ public:
     return __book.available();
   }
 
-  size_t
+  usize
   total() const
   {
     if ( empty() )
@@ -239,25 +239,25 @@ public:
   }
 
   // to be used in loops where sheet is always allocd
-  size_t
+  usize
   ftotal() const
   {
     return __book.__total();
   }
 
-  size_t
+  usize
   used() const
   {
     return __book.used();
   }
 
-  size_t
+  usize
   tombstoned() const
   {
     return __book.tombstoned();
   }
 
-  size_t
+  usize
   allocated() const
   {
     return __kernel_memory.len - __guard_offset;
@@ -292,9 +292,264 @@ public:
 
 template <u64 Sz>
 sheet<Sz>
-make_sheet(size_t req_size)
+make_sheet(usize req_size)
 {
   return sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(req_size));
 }
 
+// tslf cache sheets
+// implemented to alleviate pressures for small allocations
+
+template <u64 Sz> class tlsf_sheet
+{
+  constexpr static const u64 __size_class = Sz;
+  using stack_page_list = __tlsf_list<micron::__chunk<byte>, __size_class, 64>;
+  micron::__chunk<byte> __kernel_memory;
+  stack_page_list __book;
+  usize __guard_offset;
+
+  inline __attribute__((always_inline)) void
+  __impl_release(void)
+  {
+    if ( !__kernel_memory.zero() ) {
+      if ( micron::munmap(reinterpret_cast<addr_t *>(__kernel_memory.ptr), __kernel_memory.len) == -1 )
+        micron::abort();
+      __kernel_memory.ptr = nullptr;
+      __kernel_memory.len = 0;
+    }
+  }
+
+public:
+  ~tlsf_sheet() { __impl_release(); };
+
+  tlsf_sheet(void) = delete;
+
+  tlsf_sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0) {}
+
+  tlsf_sheet(const micron::__chunk<byte> &mem, usize offset)
+      : __kernel_memory(mem), __book(micron::__chunk<byte>{ mem.ptr, mem.len - offset }), __guard_offset(offset)
+  {
+  }
+
+  tlsf_sheet(const tlsf_sheet &) = delete;
+
+  tlsf_sheet(tlsf_sheet &&o)
+      : __kernel_memory(micron::move(o.__kernel_memory)), __book(micron::move(o.__book)), __guard_offset(o.__guard_offset)
+  {
+    o.__guard_offset = 0;
+  }
+
+  tlsf_sheet &operator=(const tlsf_sheet &) = delete;
+
+  tlsf_sheet &
+  operator=(tlsf_sheet &&o)
+  {
+    __kernel_memory = micron::move(o.__kernel_memory);
+    __book = micron::move(o.__book);
+    __guard_offset = o.__guard_offset;
+    o.__guard_offset = 0;
+    return *this;
+  }
+
+  bool
+  freeze(void)
+  {
+    if ( micron::mprotect(__kernel_memory.ptr, __kernel_memory.len, micron::prot_read) != 0 )
+      return false;
+    return true;
+  }
+
+  bool
+  freeze(int prot)
+  {
+    if ( micron::mprotect(__kernel_memory.ptr, __kernel_memory.len, prot) != 0 )
+      return false;
+    return true;
+  }
+
+  void
+  release(void)
+  {
+    __impl_release();
+  }
+
+  bool
+  empty(void) const noexcept
+  {
+    return __kernel_memory.zero();
+  }
+
+  micron::__chunk<byte>
+  mark(usize mem_sz)
+  {
+    if ( empty() )
+      return { nullptr, 0 };
+    micron::__chunk<byte> _p = __book.allocate(mem_sz);
+    if ( _p.zero() or _p.invalid() )
+      return { nullptr, 0 };
+    return _p;
+  }
+
+  micron::__chunk<byte>
+  temporal_mark(usize mem_sz)
+  {
+    if ( empty() )
+      return { nullptr, 0 };
+    micron::__chunk<byte> _p = __book.temporal_allocate(mem_sz);
+    if ( _p.zero() or _p.invalid() )
+      return { nullptr, 0 };
+    return _p;
+  }
+
+  micron::__chunk<byte>
+  try_mark(usize mem_sz)
+  {
+    if ( empty() )
+      micron::abort();
+    micron::__chunk<byte> _p = __book.allocate(mem_sz);
+    if ( _p.zero() or _p.invalid() )
+      return { (micron::numeric_limits<byte *>::max() - 1), 0xFF };
+    return _p;
+  }
+
+  bool
+  try_unmark(micron::__chunk<byte> _p)
+  {
+    if ( empty() )
+      micron::abort();
+    if ( _p.zero() )
+      micron::abort();
+    auto r = __book.deallocate(_p);
+    if ( r == __flag_out_of_space )
+      return false;
+    if ( r == __flag_invalid or r == __flag_failure )
+      return false;
+    return true;
+  }
+
+  bool
+  try_tombstone(micron::__chunk<byte> _p)
+  {
+    if ( empty() )
+      micron::abort();
+    if ( _p.zero() )
+      micron::abort();
+    auto r = __book.tombstone(_p);
+    if ( r == __flag_out_of_space )
+      return false;
+    if ( r == __flag_invalid or r == __flag_failure )
+      return false;
+    return true;
+  }
+
+  bool
+  try_unmark_no_size(byte *_p)
+  {
+    if ( empty() )
+      micron::abort();
+    if ( _p == nullptr )
+      micron::abort();
+    __book.deallocate(_p);
+    return true;
+  }
+
+  bool
+  try_tombstone_no_size(byte *_p)
+  {
+    if ( empty() )
+      micron::abort();
+    if ( _p == nullptr )
+      micron::abort();
+    __book.tombstone(_p);
+    return true;
+  }
+
+  bool
+  find(byte *_p)
+  {
+    if ( _p == nullptr )
+      return false;
+    if ( empty() )
+      micron::abort();
+    if ( _p == nullptr )
+      micron::abort();
+    return !__book.is_tombstoned(_p);
+  }
+
+  usize
+  available() const
+  {
+    return empty() ? 0 : __book.available();
+  }
+
+  usize
+  total() const
+  {
+    return empty() ? 0 : __book.__total();
+  }
+
+  usize
+  ftotal() const
+  {
+    return __book.__total();
+  }
+
+  usize
+  used() const
+  {
+    return __book.used();
+  }
+
+  usize
+  tombstoned() const
+  {
+    return __book.tombstoned();
+  }
+
+  usize
+  allocated() const
+  {
+    return __kernel_memory.len - __guard_offset;
+  }
+
+  usize
+  block_size_of(byte *ptr) const
+  {
+    return __book.block_size(ptr);
+  }
+
+  addr_t *
+  addr() const
+  {
+    return reinterpret_cast<addr_t *>(__kernel_memory.ptr);
+  }
+
+  addr_t *
+  addr_end() const
+  {
+    return reinterpret_cast<addr_t *>(__kernel_memory.ptr + __kernel_memory.len - __guard_offset);
+  }
+
+  bool
+  is_at(addr_t *_addr) const
+  {
+    if ( _addr >= addr() and _addr < addr_end() )
+      return true;
+    return false;
+  }
+
+  void
+  reset(void)
+  {
+    __impl_release();
+  }
 };
+
+template <u64 Sz>
+tlsf_sheet<Sz>
+make_tlsf_sheet(usize req_size)
+{
+  return tlsf_sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(req_size));
+}
+
+};     // namespace abc

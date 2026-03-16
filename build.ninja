@@ -45,6 +45,9 @@ rule cc_compile_cmnd_debug_no_libc
 rule cc_compile_cmnd_debug
   command = echo -e "\n\n\033[1;32mBuilding:\033[0m $out" && $timer $compiler_gnu $cflags_gnu_debug $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
 
+build bench_abcmalloc_cycles: cc_compile_cmnd tests/general/abcmalloc_bench_abc_cycles.cpp
+build bench_malloc_pages: cc_compile_cmnd tests/general/abcmalloc_bench_pages.cpp
+build bench_abcmalloc_pages: cc_compile_cmnd tests/general/abcmalloc_bench_abc_pages.cpp
 build bench_abcmalloc_4gb: cc_compile_cmnd tests/general/abcmalloc_bench_abc_4gb.cpp
 build bench_abcmalloc_large: cc_compile_cmnd tests/general/abcmalloc_bench_abc_large.cpp
 build bench_abcmalloc_large_freq: cc_compile_cmnd tests/general/abcmalloc_bench_abc_large_freq.cpp

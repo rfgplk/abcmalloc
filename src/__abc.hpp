@@ -23,7 +23,7 @@
 
 #include <micron/types.hpp>
 
-#include <micron/allocation/kmemory.hpp>
+#include <micron/memory/allocation/kmemory.hpp>
 
 #include <micron/except.hpp>
 #include <micron/type_traits.hpp>

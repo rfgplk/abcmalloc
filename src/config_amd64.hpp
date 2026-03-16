@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <micron/allocation/kmemory.hpp>
+#include <micron/memory/allocation/kmemory.hpp>
 
 namespace abc
 {
@@ -54,7 +54,7 @@ constexpr static const u64 __default_arena_page_buf = 512;              // 2MiB 
 constexpr static const u64 __default_magic_size = micron::numeric_limits<u64>::max();
 constexpr static const u64 __default_minimum_page_mul = 16;         // 65kB minimum per sheet, larger buckets will exceed this
 constexpr static const f32 __default_prealloc_factor = 0.0075f;     // 0.75% of total system mem
-constexpr static const u64 __default_cache_step = 768;              // ~5.9MB
+constexpr static const u64 __default_cache_step = 2048;
 
 constexpr static const bool __default_launder
     = false;     // by default is off, laundering lets the allocators allocate same sized requests at the same address
@@ -90,6 +90,7 @@ constexpr static const bool __default_insert_guard_pages = true;
 constexpr static const int __default_guard_page_perms = micron::prot_none;
 
 // NOTE: all of these cost a lot of performance
+constexpr static const bool __default_self_cleanup = false;     // on exit should pages be freed or leave it to the kernel to reclaim?
 constexpr static const bool __default_debug_notices = false;
 constexpr static const bool __default_zero_on_alloc = false;
 constexpr static const bool __default_zero_on_free = false;

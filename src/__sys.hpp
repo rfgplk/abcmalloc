@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <micron/allocation/kmemory.hpp>
+#include <micron/memory/allocation/kmemory.hpp>
 
 #include <micron/errno.hpp>
 #include <micron/except.hpp>
