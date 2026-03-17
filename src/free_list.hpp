@@ -490,8 +490,9 @@ struct __buddy_list {
       n = 1;
     if ( !base )
       return { nullptr, 0 };
+    // add block header to recd size BEFORE adjusting for order
+    n += sizeof(block_header);
     usize needed = (n + Min - 1) & ~(Min - 1);
-    needed += sizeof(block_header);
     i64 o = order_for_size(needed);
     if ( o >= max_order )
       return { nullptr, 0 };
@@ -528,8 +529,8 @@ struct __buddy_list {
     if ( !base )
       return { nullptr, 0 };
 
-    usize needed = (n + Min - 1) & ~(Min - 1);
     needed += sizeof(block_header);
+    usize needed = (n + Min - 1) & ~(Min - 1);
     i64 o = order_for_size(needed);
     if ( o >= max_order )
       return { nullptr, 0 };

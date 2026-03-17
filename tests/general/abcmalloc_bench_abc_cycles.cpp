@@ -47,5 +47,6 @@ main()
   mc::console("Inst: ", per_instruction(benched));
   mc::console("Miss branch: ", miss_percent(benched));
   mc::console("C/Inst: ", cycles_per_instruction(benched));
+  std::cout << "C/Inst: " << cycles_per_instruction(benched) << std::endl;
   return 0;
 }
