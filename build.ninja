@@ -55,6 +55,7 @@ build bench_abcmalloc_small: cc_compile_cmnd tests/general/abcmalloc_bench_abc_s
 build bench_abcmalloc: cc_compile_cmnd tests/general/abcmalloc_bench_abc.cpp
 build bench_base_malloc: cc_compile_cmnd tests/general/abcmalloc_bench_malloc.cpp
 build test_abcmalloc_extensive: cc_compile_cmnd tests/extensive.cpp
+build test_abcmalloc_extensive_tiered: cc_compile_cmnd_debug tests/extensive_tiered.cpp
 build test_abcmalloc_simple: cc_compile_cmnd_debug tests/simple.cpp
 build test_abcmalloc_leak: cc_compile_cmnd tests/leak.cpp
 build test_abcmalloc_align: cc_compile_cmnd tests/alignment.cpp
