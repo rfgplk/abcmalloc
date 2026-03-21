@@ -114,12 +114,23 @@ static inline micron::__chunk<byte>
 __get_guarded_kernel_chunk(usize sz)
 {
   auto chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz + __system_pagesize);
+  if ( chnk.zero() or chnk.ptr == (byte *)-1 ) [[unlikely]] {
+    __debug_print("__get_guarded_kernel_chunk()!!!: mmap failed for size: ", sz + __system_pagesize);
+    micron::abort();
+  }
   if ( micron::mprotect(chnk.ptr + (chnk.len - __system_pagesize), __system_pagesize, __default_guard_page_perms) != 0 ) {
     __debug_print("__get_guarded_kernel_chunk()!!!: mprotect failed for guard page", 0);
     micron::abort();
   }
   __debug_print("__get_guarded_kernel_chunk(): guard page at offset: ", chnk.len - __system_pagesize);
   return chnk;
+}
+
+// validate a kernel chunk before constructing a sheet from it
+static inline bool
+__kernel_chunk_valid(const micron::__chunk<byte> &chnk)
+{
+  return chnk.ptr != nullptr and chnk.ptr != (byte *)-1 and chnk.len != 0;
 }
 
 class __arena : private cache
@@ -189,7 +200,7 @@ class __arena : private cache
     register_sheet(node<sheet_type> *nd)
     {
       if ( __count >= __max_sheets ) [[unlikely]]
-        micron::abort();
+        return __max_sheets;     // sentinel: tier full, caller must handle
 
       addr_t *lo = nd->nd->addr();
       addr_t *hi = nd->nd->addr_end();
@@ -418,11 +429,23 @@ class __arena : private cache
       auto chnk = __get_guarded_kernel_chunk(sz);
       nd->nd = new (p) Sh(chnk, __system_pagesize);
     } else {
-      nd->nd = new (p) Sh(__get_kernel_chunk<micron::__chunk<byte>>(sz));
+      auto chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz);
+      if ( !__kernel_chunk_valid(chnk) ) [[unlikely]] {
+        __debug_print("__expand_arena_tier()!!!: mmap failed for arena tier expansion, req: ", sz);
+        abort_state();
+      }
+      nd->nd = new (p) Sh(chnk);
+    }
+    if ( nd->nd->empty() ) [[unlikely]] {
+      __debug_print("__expand_arena_tier()!!!: sheet construction failed, kernel chunk invalid", 0);
+      abort_state();
     }
     nd->nxt = nullptr;
     _arena_tier.link_at_tail(nd);
-    _arena_tier.register_sheet(nd);
+    if ( _arena_tier.register_sheet(nd) == _arena_tier.__max_sheets ) [[unlikely]] {
+      __debug_print("__expand_arena_tier()!!!: arena tier index full", 0);
+      abort_state();
+    }
     __debug_print("__expand_arena_tier(): new arena node allocated, size: ", sz);
   }
 
@@ -451,23 +474,45 @@ class __arena : private cache
   }
 
   template <u64 Sz>
-  inline __attribute__((always_inline)) void
+  inline __attribute__((always_inline)) bool
   __expand_tlsf(__tier<tlsf_sheet<Sz>> &tier, usize sz)
   {
     __debug_print("__expand_tlsf(): class size: ", Sz);
     __debug_print("__expand_tlsf(): requested backing region: ", sz);
     using Nd = node<tlsf_sheet<Sz>>;
     using Sh = tlsf_sheet<Sz>;
-    micron::__chunk<byte> buf = __mark_arena(sizeof(Nd) + sizeof(Sh));
+    usize pair_sz = sizeof(Nd) + sizeof(Sh);
+    micron::__chunk<byte> buf = __mark_arena(pair_sz);
     byte *p = buf.ptr;
+    usize aligned_sz = __page_round(sz);
+    auto chnk = __get_kernel_chunk<micron::__chunk<byte>>(aligned_sz);
+    if ( !__kernel_chunk_valid(chnk) ) [[unlikely]] {
+      __debug_print("__expand_tlsf(): mmap failed for tlsf expansion, class: ", Sz);
+      __debug_print("__expand_tlsf(): requested size: ", aligned_sz);
+      __unmark_from_arena(buf.ptr, pair_sz);
+      return false;
+    }
     auto *nd = new (p) Nd();
     p += sizeof(Nd);
-    usize aligned_sz = __page_round(sz);
-    nd->nd = new (p) Sh(__get_kernel_chunk<micron::__chunk<byte>>(aligned_sz));
+    nd->nd = new (p) Sh(chnk);
+    if ( nd->nd->empty() ) [[unlikely]] {
+      __debug_print("__expand_tlsf(): sheet construction failed, class: ", Sz);
+      nd->nd->release();
+      __unmark_from_arena(buf.ptr, pair_sz);
+      return false;
+    }
     nd->nxt = nullptr;
     tier.link_at_tail(nd);
-    tier.register_sheet(nd);
+    u32 pos = tier.register_sheet(nd);
+    if ( pos == tier.__max_sheets ) [[unlikely]] {
+      __debug_print("__expand_tlsf(): tier full (__max_sheets reached), class: ", Sz);
+      tier.unlink_node(nd);
+      nd->nd->release();
+      __unmark_from_arena(buf.ptr, pair_sz);
+      return false;
+    }
     __debug_print("__expand_tlsf(): new tlsf node ready, backing size: ", aligned_sz);
+    return true;
   }
 
   template <u64 Sz>
@@ -500,29 +545,61 @@ class __arena : private cache
   }
 
   template <u64 Sz>
-  inline __attribute__((always_inline)) void
+  inline __attribute__((always_inline)) bool
   __expand_buddy(__tier<sheet<Sz>> &tier, usize sz)
   {
     __debug_print("__expand_buddy(): class size: ", Sz);
     __debug_print("__expand_buddy(): requested expansion size: ", sz);
     using Nd = node<sheet<Sz>>;
     using Sh = sheet<Sz>;
-    micron::__chunk<byte> buf = __mark_arena(sizeof(Nd) + sizeof(Sh));
+    usize pair_sz = sizeof(Nd) + sizeof(Sh);
+    micron::__chunk<byte> buf = __mark_arena(pair_sz);
     byte *p = buf.ptr;
+
+    micron::__chunk<byte> chnk;
+    if constexpr ( __default_insert_guard_pages ) {
+      __debug_print("__expand_buddy(): inserting guard page for class: ", Sz);
+      chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz + __system_pagesize);
+      if ( !__kernel_chunk_valid(chnk) ) [[unlikely]] {
+        __debug_print("__expand_buddy(): mmap failed for buddy expansion, class: ", Sz);
+        __unmark_from_arena(buf.ptr, pair_sz);
+        return false;
+      }
+      __make_guard(chnk);
+    } else {
+      chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz);
+      if ( !__kernel_chunk_valid(chnk) ) [[unlikely]] {
+        __debug_print("__expand_buddy(): mmap failed for buddy expansion, class: ", Sz);
+        __unmark_from_arena(buf.ptr, pair_sz);
+        return false;
+      }
+    }
+
     auto *nd = new (p) Nd();
     p += sizeof(Nd);
     if constexpr ( __default_insert_guard_pages ) {
-      __debug_print("__expand_buddy(): inserting guard page for class: ", Sz);
-      auto chnk = __get_kernel_chunk<micron::__chunk<byte>>(sz + __system_pagesize);
-      __make_guard(chnk);
       nd->nd = new (p) Sh(chnk, __system_pagesize);
     } else {
-      nd->nd = new (p) Sh(__get_kernel_chunk<micron::__chunk<byte>>(sz));
+      nd->nd = new (p) Sh(chnk);
+    }
+    if ( nd->nd->empty() ) [[unlikely]] {
+      __debug_print("__expand_buddy(): sheet construction failed (empty), class: ", Sz);
+      nd->nd->release();
+      __unmark_from_arena(buf.ptr, pair_sz);
+      return false;
     }
     nd->nxt = nullptr;
     tier.link_at_tail(nd);
-    tier.register_sheet(nd);
+    u32 pos = tier.register_sheet(nd);
+    if ( pos == tier.__max_sheets ) [[unlikely]] {
+      __debug_print("__expand_buddy(): tier full (__max_sheets reached), class: ", Sz);
+      tier.unlink_node(nd);
+      nd->nd->release();
+      __unmark_from_arena(buf.ptr, pair_sz);
+      return false;
+    }
     __debug_print("__expand_buddy(): new buddy node ready for class: ", Sz);
+    return true;
   }
 
   inline __attribute__((always_inline)) void
@@ -536,7 +613,7 @@ class __arena : private cache
     __debug_print("__make_guard(): guard page installed at offset: ", mem.len - __system_pagesize);
   }
 
-  void
+  bool
   __buf_expand_exact(const usize class_sz, const usize exact_sz)
   {
     __debug_print("__buf_expand_exact(): routing class_sz: ", class_sz);
@@ -544,8 +621,7 @@ class __arena : private cache
 
     if ( class_sz <= __class_small ) {
       __debug_print("__buf_expand_exact(): routed to precise/tlsf tier", 0);
-      __expand_tlsf<__class_precise>(_precise, exact_sz);
-      return;
+      return __expand_tlsf<__class_precise>(_precise, exact_sz);
     }
 
     if ( class_sz < __class_medium ) [[likely]] {
@@ -554,13 +630,13 @@ class __arena : private cache
         if ( _small.empty() ) [[unlikely]] {
           __debug_print("__buf_expand_exact(): lazy-constructing small bucket", 0);
           __init_tlsf<__class_small>(_small, __calculate_space_small(__class_small));
+          return true;     // __init aborts on failure, reaching here means success
         } else {
-          __expand_tlsf<__class_small>(_small, exact_sz);
+          return __expand_tlsf<__class_small>(_small, exact_sz);
         }
       } else {
-        __expand_tlsf<__class_small>(_small, exact_sz);
+        return __expand_tlsf<__class_small>(_small, exact_sz);
       }
-      return;
     }
 
     if ( class_sz <= __class_large ) {
@@ -569,13 +645,13 @@ class __arena : private cache
         if ( _medium.empty() ) [[unlikely]] {
           __debug_print("__buf_expand_exact(): lazy-constructing medium bucket", 0);
           __init_buddy<__class_medium>(_medium);
+          return true;
         } else {
-          __expand_buddy<__class_medium>(_medium, exact_sz);
+          return __expand_buddy<__class_medium>(_medium, exact_sz);
         }
       } else {
-        __expand_buddy<__class_medium>(_medium, exact_sz);
+        return __expand_buddy<__class_medium>(_medium, exact_sz);
       }
-      return;
     }
 
     if ( class_sz <= __class_huge ) {
@@ -583,18 +659,19 @@ class __arena : private cache
       if ( _large.empty() ) [[unlikely]] {
         __debug_print("__buf_expand_exact(): lazy-constructing large bucket", 0);
         __init_buddy<__class_large>(_large, exact_sz);
+        return true;
       } else {
-        __expand_buddy<__class_large>(_large, exact_sz);
+        return __expand_buddy<__class_large>(_large, exact_sz);
       }
-      return;
     }
 
     __debug_print("__buf_expand_exact(): routed to huge/buddy tier", 0);
     if ( _huge.empty() ) [[unlikely]] {
       __debug_print("__buf_expand_exact(): lazy-constructing huge bucket", 0);
       __init_buddy<__class_huge>(_huge, exact_sz);
+      return true;
     } else {
-      __expand_buddy<__class_huge>(_huge, exact_sz);
+      return __expand_buddy<__class_huge>(_huge, exact_sz);
     }
   }
 
@@ -816,7 +893,12 @@ class __arena : private cache
         __unmark_from_arena(reinterpret_cast<byte *>(nd), sizeof(node<sheet_type>) + sizeof(sheet_type));
       }
     } else {
-      // immediate reclaim. prevents sheet accumulation under monotonically growing size patterns 
+      // immediate reclaim: if this specific sheet is fully drained (used == 0)
+      // AND tombstoned bytes occupy >= 50% of the sheet's total capacity,
+      // reclaim now rather than waiting for the batch sweep. prevents sheet
+      // accumulation under monotonically-growing size patterns while preserving
+      // mostly-pristine sheets that still have reusable free space.
+      // uses the same condition as the batch sweep and the interval==0 path.
       if ( nd != &tier.head and nd->nd->used() == 0 ) {
         usize ts = nd->nd->tombstoned();
         usize ft = nd->nd->ftotal();
@@ -1212,59 +1294,53 @@ public:
       __debug_print("push(): alloc failed, retry: ", i);
       __debug_print("push(): expanding for alloc_sz: ", alloc_sz);
 
+      bool expanded = false;
+
       if ( alloc_sz <= __class_small ) {
         usize __next_sz = __calculate_space_cache(__default_cache_step);
         __debug_print("push(): precise/small path, expanding by: ", __next_sz);
-        __buf_expand_exact(alloc_sz, __next_sz);
-        continue;
-      }
-
-      if constexpr ( __is_constrained ) {
+        expanded = __buf_expand_exact(alloc_sz, __next_sz);
+      } else if constexpr ( __is_constrained ) {
         if ( alloc_sz >= __class_medium ) {
           usize __next_sz = __calculate_space_medium(alloc_sz) * __default_overcommit;
           __predict += __next_sz;
           usize predicted = __predict.predict_size(__next_sz);
           __debug_print("push() constrained: medium+ path, next_sz: ", __next_sz);
           __debug_print("push() constrained: predictor suggested: ", predicted);
-          __buf_expand_exact(alloc_sz, predicted);
-          continue;
+          expanded = __buf_expand_exact(alloc_sz, predicted);
         }
-      }
-
-      if constexpr ( !__is_constrained ) {
+      } else if constexpr ( !__is_constrained ) {
         if ( alloc_sz >= __class_medium && alloc_sz < __class_1mb ) {
           usize __next_sz = __calculate_space_medium(alloc_sz) * __default_overcommit;
           __predict += __next_sz;
           usize predicted = __predict.predict_size(__next_sz);
           __debug_print("push(): medium path, next_sz: ", __next_sz);
           __debug_print("push(): predictor suggested: ", predicted);
-          __buf_expand_exact(alloc_sz, predicted);
-          continue;
-        }
-        if ( alloc_sz >= __class_1mb && alloc_sz < __class_gb ) {
+          expanded = __buf_expand_exact(alloc_sz, predicted);
+        } else if ( alloc_sz >= __class_1mb && alloc_sz < __class_gb ) {
           usize __next_sz = __calculate_space_huge(alloc_sz) * __default_overcommit;
           __predict += __next_sz;
           usize predicted = __predict.predict_size(__next_sz);
           __debug_print("push(): 1mb-gb path, next_sz: ", __next_sz);
           __debug_print("push(): predictor suggested: ", predicted);
-          __buf_expand_exact(alloc_sz, predicted);
-          continue;
-        }
-        if ( alloc_sz >= __class_gb ) {
+          expanded = __buf_expand_exact(alloc_sz, predicted);
+        } else if ( alloc_sz >= __class_gb ) {
           usize bulk = __calculate_space_bulk(alloc_sz);
           __debug_print("push(): bulk (>=gb) path, bulk_sz: ", bulk);
-          __buf_expand_exact(alloc_sz, bulk);
-          continue;
+          expanded = __buf_expand_exact(alloc_sz, bulk);
+        } else {
+          usize __next_sz = __calculate_space_small(alloc_sz) * __default_overcommit;
+          __predict += __next_sz;
+          usize predicted = __predict.predict_size(__next_sz);
+          __debug_print("push(): fallback small path, next_sz: ", __next_sz);
+          __debug_print("push(): predictor suggested: ", predicted);
+          expanded = __buf_expand_exact(alloc_sz, predicted);
         }
       }
 
-      {
-        usize __next_sz = __calculate_space_small(alloc_sz) * __default_overcommit;
-        __predict += __next_sz;
-        usize predicted = __predict.predict_size(__next_sz);
-        __debug_print("push(): fallback small path, next_sz: ", __next_sz);
-        __debug_print("push(): predictor suggested: ", predicted);
-        __buf_expand_exact(alloc_sz, predicted);
+      if ( !expanded ) [[unlikely]] {
+        __debug_print("push(): expansion failed (mmap OOM or tier full), giving up", 0);
+        break;
       }
     }
 
@@ -1302,18 +1378,23 @@ public:
         return memory;
       }
       __debug_print("launder(): launder failed, retry: ", i);
+      bool expanded = false;
       if ( alloc_sz >= __class_medium and alloc_sz < __class_gb ) {
         usize next = __calculate_space_huge(alloc_sz) * __default_overcommit;
         __debug_print("launder(): medium-gb path, expanding: ", next);
-        __buf_expand_exact(alloc_sz, next);
+        expanded = __buf_expand_exact(alloc_sz, next);
       } else if ( alloc_sz >= __class_gb ) {
         usize bulk = __calculate_space_bulk(alloc_sz);
         __debug_print("launder(): bulk path, expanding: ", bulk);
-        __buf_expand_exact(alloc_sz, bulk);
+        expanded = __buf_expand_exact(alloc_sz, bulk);
       } else {
         usize next = __calculate_space_small(alloc_sz) * __default_overcommit;
         __debug_print("launder(): small path, expanding: ", next);
-        __buf_expand_exact(alloc_sz, next);
+        expanded = __buf_expand_exact(alloc_sz, next);
+      }
+      if ( !expanded ) [[unlikely]] {
+        __debug_print("launder(): expansion failed (mmap OOM or tier full), giving up", 0);
+        break;
       }
     }
     __debug_print("launder()!!!: all retries exhausted for size: ", sz);
