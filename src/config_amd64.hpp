@@ -27,34 +27,34 @@ namespace abc
 {
 
 constexpr static const bool __is_constrained = false;     // for if running on a mem constrained system
-constexpr static const u64 __system_pagesize = micron::page_size;
+constexpr static const usize __system_pagesize = micron::page_size;
 
 // shifts defined like this so we can easily pull them up in code
-constexpr static const u64 __class_arena_internal = 1024;
-constexpr static const u64 __class_precise_shift = 8;
-constexpr static const u64 __class_small_shift = 9;
-constexpr static const u64 __class_medium_shift = 12;
-constexpr static const u64 __class_large_shift = 15;
-constexpr static const u64 __class_huge_shift = 18;
-constexpr static const u64 __class_1mb_shift = 20;
-constexpr static const u64 __class_gb_shift = 29;     // go from ~500mb
-constexpr static const u64 __class_precise = (1 << __class_precise_shift);
-constexpr static const u64 __class_small = (1 << __class_small_shift);
-constexpr static const u64 __class_medium = (1 << __class_medium_shift);
-constexpr static const u64 __class_large = (1 << __class_large_shift);
-constexpr static const u64 __class_huge = (1 << __class_huge_shift);
-constexpr static const u64 __class_1mb = (1 << __class_1mb_shift);
-constexpr static const u64 __class_gb = (1 << __class_gb_shift);
-constexpr static const u64 __alloc_limit = 0;     // forbid any allocations greater than this, active only if __is_constrained is true
+constexpr static const usize __class_arena_internal = 1024;
+constexpr static const usize __class_precise_shift = 8;
+constexpr static const usize __class_small_shift = 9;
+constexpr static const usize __class_medium_shift = 12;
+constexpr static const usize __class_large_shift = 15;
+constexpr static const usize __class_huge_shift = 18;
+constexpr static const usize __class_1mb_shift = 20;
+constexpr static const usize __class_gb_shift = 29;     // go from ~500mb
+constexpr static const usize __class_precise = (1 << __class_precise_shift);
+constexpr static const usize __class_small = (1 << __class_small_shift);
+constexpr static const usize __class_medium = (1 << __class_medium_shift);
+constexpr static const usize __class_large = (1 << __class_large_shift);
+constexpr static const usize __class_huge = (1 << __class_huge_shift);
+constexpr static const usize __class_1mb = (1 << __class_1mb_shift);
+constexpr static const usize __class_gb = (1 << __class_gb_shift);
+constexpr static const usize __alloc_limit = 0;     // forbid any allocations greater than this, active only if __is_constrained is true
 
 // these two switches determine the number of *pages* to allocate on initialization, by default, it's 512 pages for the
 // internal abcmalloc metabuffer, and a minimum of 16 per each new sheet allocation
-constexpr static const u64 __default_cache_size_factor = (1 << 13);     // 1 MB total (mults by class_precise)
-constexpr static const u64 __default_arena_page_buf = 512;              // 2MiB for now... ~81k rnd allocations
-constexpr static const u64 __default_magic_size = micron::numeric_limits<u64>::max();
-constexpr static const u64 __default_minimum_page_mul = 16;         // 65kB minimum per sheet, larger buckets will exceed this
+constexpr static const usize __default_cache_size_factor = (1 << 13);     // 1 MB total (mults by class_precise)
+constexpr static const usize __default_arena_page_buf = 512;              // 2MiB for now... ~81k rnd allocations
+constexpr static const usize __default_magic_size = micron::numeric_limits<usize>::max();
+constexpr static const usize __default_minimum_page_mul = 16;       // 65kB minimum per sheet, larger buckets will exceed this
 constexpr static const f32 __default_prealloc_factor = 0.0075f;     // 0.75% of total system mem
-constexpr static const u64 __default_cache_step = 768;              // ~5.9MB
+constexpr static const usize __default_cache_step = 768;            // ~5.9MB
 
 constexpr static const bool __default_launder
     = false;     // by default is off, laundering lets the allocators allocate same sized requests at the same address
@@ -65,23 +65,49 @@ constexpr static const bool __default_multithread_safe = true;     // essentiall
 constexpr static const bool __default_eager_hot_tiers
     = true;     // eagerly preallocate precise/small/medium with weight-based shares even if __default_lazy_construct is true
 
+// per-class free cache, caches recent allocations in a free list for rapid allocs
+constexpr static const bool __default_per_class_free_cache = true;
+
 // 0 == per-dealloc tombstone ratio check (pre 1.1 behav.)
 // >0 == batch only sweep a tier's sheets every N deallocations
 constexpr static const u32 __default_tombstone_sweep_interval = 64;
+
+// per-tier sheet caps (multi-word __space_mask bitmap)
+// hot tiers (precise/small/medium) carry frequent small-allocation pressure;
+// cold tiers (large/huge) rarely exceed 64 sheets, so keeping them narrow conserves the per-arena tier footprint
+// NOTE: each tier costs sizeof(__range)=24B per __idx slot + ceil(N/64)*8B for the bitmap
+constexpr static const u32 __max_sheets_precise = 512;
+constexpr static const u32 __max_sheets_small = 512;
+constexpr static const u32 __max_sheets_medium = 512;
+constexpr static const u32 __max_sheets_large = 64;
+constexpr static const u32 __max_sheets_huge = 128;     // doubled to absorb sustained huge-band pressure
+constexpr static const u32 __max_sheets_arena_internal = 64;
+
+// per-tier free-cache slot counts (LIFO depth per tier)
+// 0 disables the cache for that tier
+// worst-case memory pinning = sum(slots * max_block_size) ~176 KiB at the defaults below
+constexpr static const u32 __cache_slots_precise = 32;     // 1-256 B blocks
+constexpr static const u32 __cache_slots_small = 16;       // 257-512 B
+constexpr static const u32 __cache_slots_medium = 8;       // 513 B - 4 KiB
+constexpr static const u32 __cache_slots_large = 4;        // 4 K - 32 KiB
+constexpr static const u32 __cache_slots_huge = 0;         // disabled (rare, large)
 
 static_assert(__default_single_instance != __default_global_instance,
               "abcmalloc constexpr: __default_single_instance cannot be set simultaneously with __default_global_instance.");
 
 constexpr static const byte __default_fail_result = 0;     // 0: abort 1: message 2: silent fail
-constexpr static const u64 __default_max_retries = 2;
+constexpr static const usize __default_max_retries = 2;
+
+// is a define so we can intercept at the compilation stage
+#define __MICRON_ABCMALLOC_CRITICAL_EXIT 11
 // in pages (each page is 4096)
-constexpr static const bool __default_saturated_mode = true;     // enables a saturation buffer, which checks the rate at which new requests
-                                                                 // are coming in. adjusts allocation space accordingly
-constexpr static const u64 __default_overcommit
+constexpr static const bool __default_saturated_mode = true;     // enables a saturation buffer, which checks the rate at which new
+                                                                 // requests are coming in. adjusts allocation space accordingly
+constexpr static const usize __default_overcommit
     = 1;     // overcommit multiplier, multiplies all page req. by this value. MUST BE GREATER THAN ONE AND INTEGRAL.
 
 constexpr static const bool __default_init_large_pages = false;
-constexpr static const bool __default_oom_enable = false;     // NOTE: costs performance
+constexpr static const bool __default_oom_enable = true;     // NOTE: costs performance
 constexpr static const bool __default_borrow_auto = true;
 constexpr static const float __default_oom_limit_warn = 0.1f;
 constexpr static const float __default_oom_limit_error = 0.2f;
@@ -96,7 +122,7 @@ constexpr static const bool __default_insert_guard_pages = true;
 constexpr static const int __default_guard_page_perms = micron::prot_none;
 
 // NOTE: all of these cost a lot of performance
-constexpr static const bool __default_self_cleanup = true;
+constexpr static const bool __default_self_cleanup = false;
 constexpr static const bool __default_debug_notices = false;
 constexpr static const bool __default_zero_on_alloc = false;
 constexpr static const bool __default_zero_on_free = false;

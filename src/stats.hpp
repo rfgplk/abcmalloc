@@ -29,8 +29,8 @@ namespace abc
 struct stats_t {
   u64 alloc_requests;
   u64 dealloc_requests;
-  u64 total_memory_req;            // how much was requested
-  u64 total_memory_throughput;     // how much was actually allocd
+  u64 total_memory_req;             // how much was requested
+  u64 total_memory_throughput;      // how much was actually allocd
   u64 total_memory_freed;
   u64 current_memory_usage;
   u64 current_page_usage;
@@ -49,9 +49,9 @@ enum class stat_type : int {
 
 static stats_t stat = {};
 
-template <stat_type S>
+template<stat_type S>
 inline __attribute__((always_inline)) void
-collect_stats(size_t n = 0)
+collect_stats(usize n = 0)
 {
   if constexpr ( __default_collect_stats ) {
     if constexpr ( S == stat_type::alloc ) {
@@ -73,4 +73,4 @@ get_stats(void)
 {
   return stat;
 }
-};
+};      // namespace abc

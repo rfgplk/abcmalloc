@@ -26,7 +26,7 @@ namespace abc
 {
 
 constexpr static const int ABCMALLOC_VERSION_MAJOR = 0x100;
-constexpr static const int ABCMALLOC_VERSION_MINOR = 0x020;
+constexpr static const int ABCMALLOC_VERSION_MINOR = 0x050;
 constexpr static const int ABCMALLOC_VERSION_PATCH = 0x000;
 
 template <int __major, int __minor, int __patch>
@@ -44,7 +44,9 @@ get_version(void)
   return ABCMALLOC_VERSION_MAJOR | ABCMALLOC_VERSION_MINOR | ABCMALLOC_VERSION_PATCH;
 }
 
-static_assert(MICRON_VERSION_MAJOR == 0x0000, "! invalid micron version, could result in UB");
-static_assert(MICRON_VERSION_MINOR == 0x0900, "! invalid micron version, could result in UB");
+static_assert(MICRON_ABI_VER == 9, "! invalid micron ABI version, could result in UB");
+
+// static_assert(MICRON_VERSION_MAJOR == 0x0000, "! invalid micron version, could result in UB");
+// static_assert(MICRON_VERSION_MINOR == 0x0900, "! invalid micron version, could result in UB");
 
 };

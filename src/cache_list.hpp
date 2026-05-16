@@ -269,7 +269,7 @@ struct __tlsf_list {
       if ( usable < 2 * __block_align + __min_block )
         goto fail;
 
-      // u32 bsize guard: reject pools > 4 GiB
+      // reject pools > 4 GiB
       usize data = usable - 2 * __block_align;
       if ( data > (usize)0xFFFFFFFFu )
         goto fail;

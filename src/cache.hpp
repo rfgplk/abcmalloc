@@ -28,22 +28,21 @@
 
 namespace abc
 {
-
 struct cache {
   micron::__chunk<byte>
-  __heap_grow(const size_t sz)
+  __heap_grow(const usize sz)
   {
     return { reinterpret_cast<byte *>(micron::sbrk(sz)), sz };
   }
 
   void
-  __heap_shrink(const ssize_t sz)
+  __heap_shrink(const max_t sz)
   {
     micron::sbrk((-1) * sz);
   }
 
   micron::__chunk<byte>
-  grow(const size_t sz)
+  grow(const usize sz)
   {
     collect_stats<stat_type::alloc>();
     collect_stats<stat_type::total_memory_req>(sz);
@@ -54,16 +53,15 @@ struct cache {
       collect_stats<stat_type::total_memory_throughput>(memory.len);
       return memory;
     }
-    return { (byte *)-1, micron::numeric_limits<size_t>::max() };
+    return { (byte *)-1, micron::numeric_limits<usize>::max() };
   }
 
   void
-  shrink(const ssize_t sz)
+  shrink(const max_t sz)
   {
     collect_stats<stat_type::dealloc>();
     collect_stats<stat_type::total_memory_freed>(sz);
     __heap_shrink(sz);
   }
 };
-
-};
+};     // namespace abc
