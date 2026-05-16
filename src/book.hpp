@@ -25,6 +25,7 @@
 #include "config.hpp"
 #include "free_list.hpp"
 #include "hooks.hpp"
+
 #include <micron/except.hpp>
 #include <micron/memory/addr.hpp>
 #include <micron/memory/allocation/kmemory.hpp>
@@ -220,6 +221,13 @@ public:
     if ( _p == nullptr )
       micron::abort();
     return !__book.is_tombstoned(_p);
+  }
+
+  // header-read fast path used by the per-class free cache
+  usize
+  block_size_of(byte *ptr) const
+  {
+    return __book.block_size(ptr);
   }
 
   usize

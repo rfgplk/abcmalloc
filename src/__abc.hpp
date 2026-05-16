@@ -37,31 +37,32 @@ template <typename T>
   requires(micron::is_integral_v<T>)
 struct __abc_allocator {
   static auto
-  calloc(size_t n) -> micron::__chunk<byte>     // allocate 'smartly'
+  calloc(usize n) -> micron::__chunk<byte>    
   {
     auto mem = abc::fetch(n);
-    if ( mem.ptr == (void *)-1 )
-      micron::exc<micron::except::memory_error>("abc_allocator::alloc(): mmap() failed");
+    if ( mem.ptr == nullptr || mem.ptr == (void *)-1 )
+      micron::exc<micron::except::critical_error>("abc_allocator::calloc(): arena failed to satisfy request");
+    micron::zero(mem.ptr, mem.len);
     return mem;
   };
 
   static T *
-  alloc(size_t n)     // allocate 'smartly'
+  alloc(usize n)     // allocate 'smartly'
   {
     T *ptr = abc::alloc(n);
-    if ( ptr == (void *)-1 )
-      micron::exc<micron::except::memory_error>("abc_allocator::alloc(): mmap() failed");
+    if ( ptr == nullptr || ptr == (T *)-1 )
+      micron::exc<micron::except::critical_error>("abc_allocator::alloc(): arena failed to satisfy request");
     return ptr;
   };
 
   static void
-  dealloc(T *mem, size_t len)
+  dealloc(T *mem, usize len)
   {     // deallocate at location N
     if ( mem == nullptr )
-      micron::exc<micron::except::memory_error>("abc_allocator::dealloc(): nullptr was provided");
+      micron::exc<micron::except::critical_error>("abc_allocator::dealloc(): nullptr was provided");
     abc::dealloc(mem, len);
     mem = nullptr;
   }
 };
 
-};
+};     // namespace abc

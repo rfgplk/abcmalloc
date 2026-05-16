@@ -4,9 +4,12 @@
 //  See accompanying file LICENSE_1_0.txt or copy at
 //  http://www.boost.org/LICENSE_1_0.txt
 #pragma once
+
+#include <micron/exit.hpp>
 #include <micron/memory/cmemory.hpp>
 #include <micron/simd/types.hpp>
 #include <micron/types.hpp>
+
 #include "config.hpp"
 #include "printing.hpp"
 
@@ -17,7 +20,8 @@ __attribute__((noreturn)) void
 abort_state(void)
 {
   __debug_print("abort_state(): fatal allocator error, aborting", 0);
-  micron::abort();
+  // NOTE: sys_exit invokes SYS_exit_group
+  micron::sys_exit(__MICRON_ABCMALLOC_CRITICAL_EXIT);
 }
 
 #pragma GCC diagnostic push

@@ -22,6 +22,7 @@
 
 #include <micron/type_traits.hpp>
 #include <micron/types.hpp>
+
 #include "arena.hpp"
 #include "tapi.hpp"
 
@@ -491,7 +492,7 @@ aligned_free(void *ptr)
   // recover the original raw pointer stashed before the aligned address
   byte *raw = *reinterpret_cast<byte **>(reinterpret_cast<byte *>(ptr) - sizeof(void *));
 
-  // sanity: if the stashed pointer equals the aligned pointer, this was anormal allocation shouldn't happen through the aligned_alloc path
+  // sanity: if the stashed pointer equals the aligned pointer, this was abnormal allocation shouldn't happen through the aligned_alloc path
   // reroute to regular dealloc
   if ( raw == reinterpret_cast<byte *>(ptr) ) [[unlikely]] {
     abc::dealloc(reinterpret_cast<byte *>(ptr));
@@ -504,7 +505,7 @@ aligned_free(void *ptr)
   uintptr_t aligned_addr = reinterpret_cast<uintptr_t>(ptr);
   if ( raw_addr >= aligned_addr or (aligned_addr - raw_addr) > __system_pagesize ) [[unlikely]] {
     micron::exc<micron::except::memory_error>(
-        "aligned_free(): stashed raw pointer is invalid — this pointer was not allocated by aligned_alloc");
+        "aligned_free(): stashed raw pointer is invalid, this pointer was not allocated by aligned_alloc");
     return;
   }
 
