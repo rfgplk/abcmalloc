@@ -21,15 +21,16 @@
 
 #pragma once
 
-#include "cache_list.hpp"
-#include "config.hpp"
-#include "free_list.hpp"
-#include "hooks.hpp"
-
 #include <micron/except.hpp>
 #include <micron/memory/addr.hpp>
 #include <micron/memory/allocation/kmemory.hpp>
 #include <micron/types.hpp>
+
+#include "cache_list.hpp"
+#include "config.hpp"
+#include "free_list.hpp"
+#include "hooks.hpp"
+#include "sheet_header.hpp"
 
 namespace abc
 {
@@ -37,7 +38,9 @@ namespace abc
 // calling it a sheet to avoid conf. with system pages
 template <u64 Sz> class sheet
 {
-  constexpr static const u64 __size_class = Sz;     // what class of data to hold
+public:
+  constexpr static const u64 __size_class = Sz;     // needed for tomb_for<> dispatch
+private:
   using stack_page_list = __buddy_list<micron::__chunk<byte>, __size_class, 64>;
   micron::__chunk<byte> __kernel_memory;
   stack_page_list __book;
@@ -49,6 +52,7 @@ template <u64 Sz> class sheet
   __impl_release(void)
   {
     if ( !__kernel_memory.zero() ) {
+      __sheet_unregister(__kernel_memory.ptr, __kernel_memory.len);
       if ( micron::munmap(reinterpret_cast<addr_t *>(__kernel_memory.ptr), __kernel_memory.len) == -1 ) {
         micron::abort();
       }
@@ -63,12 +67,16 @@ public:
 
   sheet(void) = delete;
 
-  sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0) {}
+  sheet(__arena *owner, const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0)
+  {
+    __sheet_register(owner, mem.ptr, mem.len);
+  }
 
   // for guard pages
-  sheet(const micron::__chunk<byte> &mem, usize offset)
+  sheet(__arena *owner, const micron::__chunk<byte> &mem, usize offset)
       : __kernel_memory(mem), __book(micron::__chunk<byte>{ mem.ptr, mem.len - offset }), __guard_offset(offset)
   {
+    __sheet_register(owner, mem.ptr, mem.len);
   }
 
   sheet(const sheet &) = delete;
@@ -230,6 +238,12 @@ public:
     return __book.block_size(ptr);
   }
 
+  bool
+  is_temporal_block(byte *ptr)
+  {
+    return __book.is_temporal(ptr);
+  }
+
   usize
   available() const
   {
@@ -300,9 +314,9 @@ public:
 
 template <u64 Sz>
 sheet<Sz>
-make_sheet(usize req_size)
+make_sheet(__arena *owner, usize req_size)
 {
-  return sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(req_size));
+  return sheet<Sz>(owner, __get_kernel_chunk<micron::__chunk<byte>>(req_size));
 }
 
 // tslf cache sheets
@@ -310,7 +324,9 @@ make_sheet(usize req_size)
 
 template <u64 Sz> class tlsf_sheet
 {
-  constexpr static const u64 __size_class = Sz;
+public:
+  constexpr static const u64 __size_class = Sz;     // exposed for tomb_for<> dispatch
+private:
   using stack_page_list = __tlsf_list<micron::__chunk<byte>, __size_class, 64>;
   micron::__chunk<byte> __kernel_memory;
   stack_page_list __book;
@@ -320,6 +336,7 @@ template <u64 Sz> class tlsf_sheet
   __impl_release(void)
   {
     if ( !__kernel_memory.zero() ) {
+      __sheet_unregister(__kernel_memory.ptr, __kernel_memory.len);
       if ( micron::munmap(reinterpret_cast<addr_t *>(__kernel_memory.ptr), __kernel_memory.len) == -1 )
         micron::abort();
       __kernel_memory.ptr = nullptr;
@@ -332,11 +349,15 @@ public:
 
   tlsf_sheet(void) = delete;
 
-  tlsf_sheet(const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0) {}
+  tlsf_sheet(__arena *owner, const micron::__chunk<byte> &mem) : __kernel_memory(mem), __book(mem), __guard_offset(0)
+  {
+    __sheet_register(owner, mem.ptr, mem.len);
+  }
 
-  tlsf_sheet(const micron::__chunk<byte> &mem, usize offset)
+  tlsf_sheet(__arena *owner, const micron::__chunk<byte> &mem, usize offset)
       : __kernel_memory(mem), __book(micron::__chunk<byte>{ mem.ptr, mem.len - offset }), __guard_offset(offset)
   {
+    __sheet_register(owner, mem.ptr, mem.len);
   }
 
   tlsf_sheet(const tlsf_sheet &) = delete;
@@ -526,6 +547,12 @@ public:
     return __book.block_size(ptr);
   }
 
+  bool
+  is_temporal_block(byte *ptr)
+  {
+    return __book.is_temporal(ptr);
+  }
+
   addr_t *
   addr() const
   {
@@ -555,9 +582,9 @@ public:
 
 template <u64 Sz>
 tlsf_sheet<Sz>
-make_tlsf_sheet(usize req_size)
+make_tlsf_sheet(__arena *owner, usize req_size)
 {
-  return tlsf_sheet<Sz>(__get_kernel_chunk<micron::__chunk<byte>>(req_size));
+  return tlsf_sheet<Sz>(owner, __get_kernel_chunk<micron::__chunk<byte>>(req_size));
 }
 
 };     // namespace abc

@@ -37,12 +37,11 @@ template <typename T>
   requires(micron::is_integral_v<T>)
 struct __abc_allocator {
   static auto
-  calloc(usize n) -> micron::__chunk<byte>    
+  calloc(usize n) -> micron::__chunk<byte>
   {
     auto mem = abc::fetch(n);
     if ( mem.ptr == nullptr || mem.ptr == (void *)-1 )
       micron::exc<micron::except::critical_error>("abc_allocator::calloc(): arena failed to satisfy request");
-    micron::zero(mem.ptr, mem.len);
     return mem;
   };
 
