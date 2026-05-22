@@ -238,6 +238,13 @@ public:
     return __book.block_size(ptr);
   }
 
+  // true iff ptr is a live (allocated, in-range) block start
+  bool
+  is_block_allocated(byte *ptr) const
+  {
+    return __book.is_allocated(ptr);
+  }
+
   bool
   is_temporal_block(byte *ptr)
   {
@@ -545,6 +552,13 @@ public:
   block_size_of(byte *ptr) const
   {
     return __book.block_size(ptr);
+  }
+
+  // true iff ptr is a live (allocated, in-range) block start
+  bool
+  is_block_allocated(byte *ptr) const
+  {
+    return __book.is_allocated(ptr);
   }
 
   bool

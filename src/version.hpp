@@ -26,7 +26,7 @@ namespace abc
 {
 
 constexpr static const int ABCMALLOC_VERSION_MAJOR = 0x100;
-constexpr static const int ABCMALLOC_VERSION_MINOR = 0x060;
+constexpr static const int ABCMALLOC_VERSION_MINOR = 0x070;
 constexpr static const int ABCMALLOC_VERSION_PATCH = 0x000;
 
 template <int __major, int __minor, int __patch>

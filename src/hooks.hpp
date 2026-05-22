@@ -24,8 +24,6 @@
 #include <micron/math/generic.hpp>
 #include <micron/types.hpp>
 
-
-
 #include "__sys.hpp"
 #include "config.hpp"
 #include "va_reserve.hpp"

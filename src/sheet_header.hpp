@@ -21,10 +21,9 @@
 
 #pragma once
 
+#include "va_reserve.hpp"
 #include <micron/atomic/atomic.hpp>
 #include <micron/types.hpp>
-
-#include "va_reserve.hpp"
 
 namespace abc
 {
