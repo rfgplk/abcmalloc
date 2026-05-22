@@ -59,22 +59,7 @@ abcmalloc is built so the *distribution*, not just the mean, is predictable.
 
 ##### Benchmarks
 
-A single-binary, apples-to-apples comparison against **glibc, mimalloc and jemalloc** lives in `benches/`:
-
-  - `benches/malloc_pathways_bench.cpp` — single-threaded; five access patterns (hot, serial bulk-free, randomized free, interleaved churn, fragmented refill) plus `launder`, swept over every size tier × 1k/10k/100k/1M, reporting cyc/op, ns/op, Mops/s, IPC, branch-miss% **and** p10/p50/p90/p99/p99.9 latency percentiles.
-  - `benches/malloc_pathways_mt_bench.cpp` — multithreaded throughput scaling (1/2/4/8 threads).
-  - `benches/plot_malloc_pathways.py` — renders the captured output into PNG charts under `benches/charts/`.
-
-Representative single-threaded hot-path results (cyc/op, lower is better):
-
-| tier  | abcmalloc | glibc | mimalloc | jemalloc |
-|-------|-----------|-------|----------|----------|
-| tiny  | 25.5      | **14.7** | 28.6  | 24.9     |
-| large | **32.6**  | 40.7  | 47.4     | 58.0     |
-
-abcmalloc is **fastest on the large/buddy tier** and competitive on small objects, where glibc's tcache leads the tiny round-trip; mimalloc/jemalloc lead some medium-size multithreaded churn. The full picture (and the tail-latency charts) is in `benches/charts/`.
-
-> Build the comparison benches with g++ directly (the `duck` driver mis-parses `-l` flags): the CLAUDE.md baseline flags + `benches/<file>.cpp -I./src -L./libs/ -lpthread -ljemalloc -lmimalloc -o bin/<name>`.
+(fill this out later properly)
 
 ##### Safety guarantees
 
