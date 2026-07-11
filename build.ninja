@@ -45,6 +45,15 @@ rule cc_compile_cmnd_debug_no_libc
 rule cc_compile_cmnd_debug
   command = echo -e "\n\n\033[1;32mBuilding:\033[0m $out" && $timer $compiler_gnu $cflags_gnu_debug $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
 
+# doctor mode: same as debug but with the forensic layer enabled (activates abc::doctor::)
+rule cc_compile_cmnd_doctor
+  command = echo -e "\n\n\033[1;32mBuilding (doctor):\033[0m $out" && $timer $compiler_gnu $cflags_gnu_debug -DABCMALLOC_DOCTOR_HELP $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
+
+# single-threaded rigor tests using the abc_rigor harness: -DABC_RIGOR_ST_ONLY gates out
+# its MT worker machinery (which pulls micron's thread subsystem -> ODR-collides with src/)
+rule cc_compile_cmnd_st_rigor
+  command = echo -e "\n\n\033[1;32mBuilding (st):\033[0m $out" && $timer $compiler_gnu $cflags_gnu -DABC_RIGOR_ST_ONLY $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
+
 build bench_abcmalloc_cycles: cc_compile_cmnd tests/general/abcmalloc_bench_abc_cycles.cpp
 build bench_malloc_pages: cc_compile_cmnd tests/general/abcmalloc_bench_pages.cpp
 build bench_abcmalloc_pages: cc_compile_cmnd tests/general/abcmalloc_bench_abc_pages.cpp
@@ -72,3 +81,46 @@ build test_abcmalloc_thread: cc_compile_cmnd tests/threading.cpp
 build test_abcmalloc_primary: cc_compile_cmnd tests/primary.cpp
 
 build abcmalloc_benches: phony bench_abcmalloc_4gb bench_abcmalloc_large bench_abcmalloc_large_freq  bench_abcmalloc_small bench_abcmalloc bench_base_malloc
+
+# ---- functional tests synced from micron (scripts/sync_tests_from_micron.py) ----
+# core: focused unit tests
+build test_core_alloc_free: cc_compile_cmnd_debug tests/core/abcmalloc_alloc_free.cpp
+build test_core_arena: cc_compile_cmnd_debug tests/core/abcmalloc_arena.cpp
+build test_core_imm: cc_compile_cmnd_debug tests/core/abcmalloc_imm.cpp
+build test_core_info: cc_compile_cmnd_debug tests/core/abcmalloc_info.cpp
+build test_core_leak: cc_compile_cmnd_debug tests/core/abcmalloc_leak.cpp
+build test_core_vet: cc_compile_cmnd_debug tests/core/abcmalloc_vet.cpp
+
+# rigor: heavier single-threaded correctness batteries (threaded rigor tests are not
+# shipped -- micron's thread subsystem hard-pulls its own allocator copy, which ODR-
+# collides with this mirror's src/; see scripts/sync_tests_from_micron.py)
+build test_rigor_abcmalloc: cc_compile_cmnd_debug tests/rigor/abcmalloc.cpp
+build test_rigor_persistent: cc_compile_cmnd_debug tests/rigor/abcmalloc_persistent.cpp
+build test_rigor_sizes: cc_compile_cmnd_debug tests/rigor/abcmalloc_sizes.cpp
+build test_rigor_stress: cc_compile_cmnd_debug tests/rigor/abcmalloc_stress.cpp
+build test_rigor_overlap_probe: cc_compile_cmnd_debug tests/rigor/abc_overlap_probe.cpp
+# single-threaded soak/realloc tests (abc_rigor harness, MT machinery gated off)
+build test_rigor_soak: cc_compile_cmnd_st_rigor tests/rigor/abcmalloc_soak.cpp
+build test_rigor_soak_serial_bulk: cc_compile_cmnd_st_rigor tests/rigor/abcmalloc_soak_serial_bulk.cpp
+build test_rigor_realloc: cc_compile_cmnd_st_rigor tests/rigor/abcmalloc_realloc.cpp
+
+# doctor: forensic layer self-tests (built with -DABCMALLOC_DOCTOR_HELP)
+build test_doctor_faults: cc_compile_cmnd_doctor tests/doctor/faults.cpp
+build test_doctor_overflow: cc_compile_cmnd_doctor tests/doctor/overflow.cpp
+build test_doctor_selftests: cc_compile_cmnd_doctor tests/doctor/selftests.cpp
+build test_doctor_structdump: cc_compile_cmnd_doctor tests/doctor/structdump.cpp
+build test_doctor_wild: cc_compile_cmnd_doctor tests/doctor/wild.cpp
+
+build abcmalloc_core: phony test_core_alloc_free test_core_arena test_core_imm test_core_info test_core_leak test_core_vet
+build abcmalloc_rigor: phony test_rigor_abcmalloc test_rigor_persistent test_rigor_sizes test_rigor_stress test_rigor_overlap_probe test_rigor_soak test_rigor_soak_serial_bulk test_rigor_realloc
+build abcmalloc_doctor: phony test_doctor_faults test_doctor_overflow test_doctor_selftests test_doctor_structdump test_doctor_wild
+build abcmalloc_tests: phony abcmalloc_core abcmalloc_rigor abcmalloc_doctor
+
+# ---- bbench-driven benches (benches/, vendored external/bbench) ----
+# these benchmark the installed micron allocator (MICRON_ABCMALLOC_STD); bbench pulls
+# the thread subsystem, so they cannot also load the local src/ copy -- see
+# scripts/sync_benches_from_micron.py
+build bbench_abc: cc_compile_cmnd benches/abcmalloc_bench.cpp
+build bbench_abc_hot: cc_compile_cmnd benches/abcmalloc_hot_bench.cpp
+build bbench_abc_interleaved: cc_compile_cmnd benches/abcmalloc_interleaved_bench.cpp
+build abcmalloc_bbench: phony bbench_abc bbench_abc_hot bbench_abc_interleaved

@@ -1,3 +1,7 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
 //  Copyright (c) 2026 David Lucius Severus
 //
 //  Distributed under the Boost Software License, Version 1.0.
@@ -33,10 +37,9 @@
 // Tune : -D BULK_TARGET_BYTES=<n> -D BULK_OPS=<n> -D BULK_VERIFY_EVERY=<n>
 //        -D BULK_SWEEP_PERMILLE=<0..1000> -D BULK_SWEEP_FREE_PCT=<0..100>
 
-#include "../support/abc_rigor.hpp"
-
 #include <micron/io/console.hpp>
 
+#include "../support/abc_rigor.hpp"
 
 #include "../snowball/snowball.hpp"
 using namespace snowball;

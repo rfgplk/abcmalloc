@@ -13,7 +13,7 @@
 <br clear="left"/>
 
 [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](#)
-![Version](https://img.shields.io/badge/version-1.8.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++23](https://img.shields.io/badge/C++-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 
@@ -60,6 +60,7 @@ abcmalloc is built so the *distribution*, not just the mean, is predictable.
 ##### Benchmarks
 
 (fill this out later properly)
+(i will fill this out later i promise, benches live at benches/ if you're curious)
 
 ##### Safety guarantees
 
@@ -77,17 +78,21 @@ Opt-in hardening (compile-time flags):
   - **Redzone sanitization** (`__default_sanitize`), **zero-on-alloc / zero-on-free**, fill-on-free patterns.
   - **Tombstoning on every tier**, **read-only freeze** of live regions (`freeze`), temporal-only allocation (`launder`).
 
+##### Doctor mode (forensic debugging)
+
+Compile any translation unit with **`-DABCMALLOC_DOCTOR_HELP`** to activate *doctor mode*; an opt-in, stateful forensic layer that is compiled out entirely (zero overhead) when the flag is absent. It records allocations, installs fault handlers, and turns latent heap bugs into precise, gdb-style diagnostics:
+
+  - **crash-safe fault handling**: guarded faults (overflow into guard pages, wild/foreign pointers) are caught and reported instead of taking down the process.
+  - **double-free / bad-free forensics**: offending frees are rejected and reported with their allocation context.
+  - **off-heap ledger**: the recording state lives outside the allocator's own VA range, so it cannot be corrupted by the very bug it is diagnosing.
+
 ##### Testing & validation
 
-abcmalloc is exercised by a dedicated rigor + soak regiment under `tests/rigor/` (snowball framework):
+  - **`tests/core/`**: focused unit tests: alloc/free round-trips, arena internals, immediate reuse, size introspection (`abcmalloc_info`), leak accounting, and a broad vetting pass (`abcmalloc_vet`).
+  - **`tests/rigor/`**: single-threaded correctness & soak batteries: `abcmalloc.cpp` (tier routing, alignment, provenance, redzones, tombstones, freezes), `abcmalloc_sizes.cpp` (exhaustive size-class coverage), `abc_overlap_probe.cpp` + `abcmalloc_realloc.cpp` (realloc semantics / in-place overlap regression), `abcmalloc_stress.cpp` (exotic/nested patterns), `abcmalloc_persistent.cpp` (pointer-stable / temporal primitives), and `abcmalloc_soak.cpp` / `abcmalloc_soak_serial_bulk.cpp` (long-running deterministic soaks). The soak/realloc tests share the `abc_rigor` harness, built with `-DABC_RIGOR_ST_ONLY` to gate out its multi-threaded worker machinery.
+  - **`tests/doctor/`**: forensic-layer self-tests built with `-DABCMALLOC_DOCTOR_HELP` (see *Doctor mode*): crash-safe recovery (`selftests`), fault and overflow trapping (`faults`, `overflow`), structure dumps (`structdump`), wild-pointer handling (`wild`).
 
-  - `abcmalloc.cpp`: correctness (tier routing, alignment, provenance, redzones, tombstones, freezes)
-  - `abcmalloc_sizes.cpp`: exhaustive size-class coverage
-  - `abcmalloc_realloc.cpp` (+ `abc_overlap_probe.cpp`): realloc semantics and the in-place overlap regression
-  - `abcmalloc_stress.cpp` / `abcmalloc_adversarial.cpp`: exotic and nested patterns, bit-flip regression detection
-  - `abcmalloc_mt.cpp` / `abcmalloc_concurrent.cpp`: cross-thread frees via the MPSC route
-  - `abcmalloc_arena_recycle.cpp`: concurrent arena reclamation (>= 64 lifetime threads)
-  - `abcmalloc_soak.cpp` / `abcmalloc_soak_serial_bulk.cpp` / `abcmalloc_soak_mt.cpp`: long-running soaks
+Build and run them with `ninja abcmalloc_tests` (or `abcmalloc_core` / `abcmalloc_rigor` / `abcmalloc_doctor`); exit `1` == pass. The *multi-threaded* rigor batteries (`concurrent`, `mt`, `soak_mt`, `arena_recycle`) live only in the parent *micron* tree.
 
 ------
 
@@ -170,7 +175,7 @@ See `config_amd64.hpp` for the complete, documented flag set (tier sheet caps, c
 
 ##### Building & integration
 
-Header-only — include `src/memory/allocation/abcmalloc/malloc.hpp` and use `abc::alloc` / `abc::dealloc`. It depends only on the *micron* core library.
+Header-only. With the *micron* core headers reachable as `<micron/...>` (an installed *micron*, e.g. `/usr/include/micron`, or `-I` a checkout), add `-Isrc` and include the umbrella **`cmalloc.hpp`**, then use `abc::alloc` / `abc::dealloc`. `cmalloc.hpp` is the canonical entry point: it defines `MICRON_ABCMALLOC_DISABLE_STD` (so *micron* core uses this allocator rather than pulling its own copy) and installs the libc drop-ins (`malloc`/`free`/...) unless `ABCMALLOC_DISABLE` is set. The bundled tests/benches build with `ninja` (see `build.ninja`).
 
   - **LD_PRELOAD** is not wired into the build; it can be added by compiling the allocator as a shared object that exports the libc allocation symbols.
   - **Language bindings** (C / Rust / Zig) do not yet exist; but they will.

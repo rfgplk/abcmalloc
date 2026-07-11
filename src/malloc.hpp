@@ -22,7 +22,6 @@
 
 #include <micron/type_traits.hpp>
 #include <micron/types.hpp>
-
 #include "arena.hpp"
 #include "tapi.hpp"
 
@@ -51,7 +50,7 @@ is_present(byte *ptr)
   return is_present(reinterpret_cast<addr_t *>(ptr));
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 bool
 is_present(T *ptr)
@@ -79,17 +78,17 @@ within(byte *ptr)
 }
 
 void
-relinquish(byte *ptr)     // unmaps entire sheet at which ptr lives, resets arena entirely
+relinquish(byte *ptr)      // unmaps entire sheet at which ptr lives, resets arena entirely
 {
   if ( !ptr ) [[unlikely]]
     return;
   __query_arena(ptr)->reset_page(ptr);
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 void
-relinquish(T *__ptr)     // unmaps entire sheet at which ptr lives, resets arena entirely
+relinquish(T *__ptr)      // unmaps entire sheet at which ptr lives, resets arena entirely
 {
   byte *ptr = reinterpret_cast<byte *>(__ptr);
   relinquish(ptr);
@@ -106,6 +105,7 @@ mark_at(byte *ptr, usize size)
 
   // verify the region isn't already tracked
   if ( __current_arena()->has_provenance(reinterpret_cast<addr_t *>(ptr)) ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, size, "mark_at(): region already tracked by allocator", __FILE__, __LINE__) ) return nullptr;)
     micron::exc<micron::except::memory_error_abc_mark>("mark_at(): region already tracked by allocator");
     return nullptr;
   }
@@ -122,11 +122,13 @@ unmark_at(byte *ptr, usize size)
     return nullptr;
 
   if ( !__current_arena()->has_provenance(reinterpret_cast<addr_t *>(ptr)) ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, size, "unmark_at(): region not tracked by allocator", __FILE__, __LINE__) ) return nullptr;)
     micron::exc<micron::except::memory_error_abc_unmark_untracked>("unmark_at(): region not tracked by allocator, cannot unmark");
     return nullptr;
   }
 
   if ( !__current_arena()->pop(ptr, size) ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, size, "unmark_at(): failed to unmark region", __FILE__, __LINE__) ) return nullptr;)
     micron::exc<micron::except::memory_error_abc_unmark_failed>("unmark_at(): failed to unmark region");
     return nullptr;
   }
@@ -135,7 +137,7 @@ unmark_at(byte *ptr, usize size)
 }
 
 micron::__chunk<byte>
-balloc(usize size)     // allocates memory, returns entire memory chunk
+balloc(usize size)      // allocates memory, returns entire memory chunk
 {
   if ( size == 0 ) [[unlikely]]
     return { nullptr, 0 };
@@ -158,7 +160,7 @@ fetch(usize size)
   return mem;
 }
 
-template <typename T>
+template<typename T>
   requires(micron::is_trivial_v<T>)
 T *
 fetch(void)
@@ -179,12 +181,14 @@ retire(byte *ptr)
     return;
 
   if ( !__query_arena(ptr)->ts_pop(ptr) ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, 0, "retire(): tombstone free failed, pointer not allocated by this arena", __FILE__,
+                                        __LINE__) ) return;)
     micron::exc<micron::except::memory_error_abc_retire>(
         "retire(): tombstone free failed, pointer may not have been allocated by this arena");
   }
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 void
 retire(T *__ptr)
@@ -194,13 +198,13 @@ retire(T *__ptr)
 }
 
 __attribute__((malloc, alloc_size(1))) auto
-alloc(usize size) -> byte *     // allocates memory, near iden. func. to malloc
+alloc(usize size) -> byte *      // allocates memory, near iden. func. to malloc
 {
   if ( size == 0 ) [[unlikely]]
     return nullptr;
 
   byte *ptr = balloc(size).ptr;
-  return ptr;     // balloc already converts sentinel to nullptr
+  return ptr;      // balloc already converts sentinel to nullptr
 }
 
 __attribute__((malloc, alloc_size(1))) byte *
@@ -245,18 +249,22 @@ dealloc(byte *ptr, usize len)
   if ( !ptr ) [[unlikely]]
     return;
   if ( len == 0 ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, 0, "dealloc(): zero-length free is invalid", __FILE__, __LINE__) ) return;)
     micron::exc<micron::except::memory_error_abc_dealloc_zero>("dealloc(): zero-length free is invalid");
     return;
   }
 
+  ABC_DOCTOR(len = doctor::check_free_size(ptr, len, __FILE__, __LINE__);)
   // dealloc(ptr len) is always explicit us, no fall throughs; treat it as a hard error, we went wrong somewhere
   if ( !__route_dealloc(ptr, len) ) [[unlikely]] {
+    ABC_DOCTOR(
+        if ( doctor::on_bad_free(ptr, len, "dealloc(ptr,len): pointer not recognised or size mismatch", __FILE__, __LINE__) ) return;)
     micron::exc<micron::except::memory_error_abc_dealloc_size>(
         "dealloc(): free failed with explicit size, pointer not recognised or size mismatch");
   }
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 void
 dealloc(T *__ptr)
@@ -265,7 +273,7 @@ dealloc(T *__ptr)
   dealloc(ptr);
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 void
 dealloc(T *__ptr, usize len)
@@ -281,11 +289,12 @@ freeze(byte *ptr)
     return;
 
   if ( !__query_arena(ptr)->freeze(ptr) ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(ptr, 0, "freeze(): pointer not recognised by allocator", __FILE__, __LINE__) ) return;)
     micron::exc<micron::except::memory_error_abc_freeze>("freeze(): failed to make region read-only, pointer not recognised by allocator");
   }
 }
 
-template <typename T>
+template<typename T>
   requires(!micron::same_as<T, byte>)
 void
 freeze(T *__ptr)
@@ -334,7 +343,7 @@ launder(usize size)
   return mem.ptr;
 }
 
-template <typename T>
+template<typename T>
 usize
 query_size(T *ptr)
 {
@@ -358,7 +367,7 @@ musage(void)
   return total;
 }
 
-template <u64 Sz>
+template<u64 Sz>
 usize
 musage(void)
 {
@@ -368,33 +377,30 @@ musage(void)
 }
 
 __attribute__((malloc, alloc_size(1))) void *
-malloc(usize size)     // alloc memory of size 'size', prefer using alloc
+malloc(usize size)      // alloc memory of size 'size', prefer using alloc
 {
   return reinterpret_cast<void *>(abc::alloc(size));
 }
 
 void *
-calloc(usize num, usize size)     // alloc's zero'd out memory, prefer using salloc()
+calloc(usize num, usize size)      // alloc's zero'd out memory, prefer using salloc()
 {
-  if ( num == 0 or size == 0 )
-    return nullptr;
+  if ( num == 0 or size == 0 ) return nullptr;
 
   usize total;
   if ( check_mul_overflow(num, size, total) ) [[unlikely]]
     return nullptr;
 
   byte *mem = abc::alloc(total);
-  if ( !mem )
-    return nullptr;
+  if ( !mem ) return nullptr;
   micron::zero(mem, total);
   return mem;
 }
 
 void *
-realloc(void *ptr, usize size)     // reallocates memory
+realloc(void *ptr, usize size)      // reallocates memory
 {
-  if ( !ptr )
-    return reinterpret_cast<void *>(abc::alloc(size));
+  if ( !ptr ) return reinterpret_cast<void *>(abc::alloc(size));
 
   if ( size == 0 ) {
     abc::dealloc(reinterpret_cast<byte *>(ptr));
@@ -403,6 +409,9 @@ realloc(void *ptr, usize size)     // reallocates memory
 
   byte *result = __current_arena()->resize(reinterpret_cast<byte *>(ptr), size);
   if ( !result ) [[unlikely]] {
+    // rescue: report, then signal failure the C-standard way (return nullptr, original block untouched)
+    ABC_DOCTOR(if ( doctor::on_bad_free(reinterpret_cast<byte *>(ptr), size, "realloc(): pointer not recognised or allocation OOM",
+                                        __FILE__, __LINE__) ) return nullptr;)
     micron::exc<micron::except::memory_error_abc_realloc_unknown>("realloc(): resize failed (pointer not recognised or allocation OOM)");
     return nullptr;
   }
@@ -410,7 +419,7 @@ realloc(void *ptr, usize size)     // reallocates memory
 }
 
 void
-free(void *ptr)     // frees memory, prefer abc::dealloc always
+free(void *ptr)      // frees memory, prefer abc::dealloc always
 {
   if ( !ptr ) [[unlikely]]
     return;
@@ -437,8 +446,7 @@ aligned_alloc(usize alignment, usize size)
   if ( size == 0 ) [[unlikely]]
     return nullptr;
 
-  if ( alignment <= __hdr_offset )
-    return reinterpret_cast<void *>(abc::alloc(size));
+  if ( alignment <= __hdr_offset ) return reinterpret_cast<void *>(abc::alloc(size));
 
   usize overhead = alignment + sizeof(void *);
   usize total;
@@ -476,11 +484,11 @@ aligned_free(void *ptr)
     return;
   }
 
-  // verify the raw pointer is at least vaguely sane: it must be before
-  // the aligned pointer and within one page of it (alignment cannot exceed the system page size in any case)
   uintptr_t raw_addr = reinterpret_cast<uintptr_t>(raw);
   uintptr_t aligned_addr = reinterpret_cast<uintptr_t>(ptr);
-  if ( raw_addr >= aligned_addr or (aligned_addr - raw_addr) > __system_pagesize ) [[unlikely]] {
+  if ( raw_addr >= aligned_addr ) [[unlikely]] {
+    ABC_DOCTOR(if ( doctor::on_bad_free(reinterpret_cast<byte *>(ptr), 0, "aligned_free(): not an aligned_alloc pointer (bad stashed raw)",
+                                        __FILE__, __LINE__) ) return;)
     micron::exc<micron::except::memory_error_abc_aligned_free_bad>(
         "aligned_free(): stashed raw pointer is invalid, this pointer was not allocated by aligned_alloc");
     return;
@@ -489,6 +497,10 @@ aligned_free(void *ptr)
   abc::dealloc(raw);
 }
 
-};     // namespace abc
+};      // namespace abc
+
+#if defined(ABCMALLOC_DOCTOR_HELP)
+#include "doctor.hpp"
+#endif
 
 #include "malloc-c.hpp"

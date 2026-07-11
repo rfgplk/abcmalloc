@@ -4,12 +4,10 @@
 //  See accompanying file LICENSE_1_0.txt or copy at
 //  http://www.boost.org/LICENSE_1_0.txt
 #pragma once
-
 #include <micron/exit.hpp>
 #include <micron/memory/cmemory.hpp>
 #include <micron/simd/types.hpp>
 #include <micron/types.hpp>
-
 #include "config.hpp"
 #include "printing.hpp"
 
@@ -53,6 +51,7 @@ fail_state(void)
 inline __attribute__((always_inline)) bool
 handle_double_free([[maybe_unused]] byte *addr)
 {
+  ABC_DOCTOR(if ( doctor::on_double_free(addr, __FILE__, __LINE__) ) return true;)
   if constexpr ( __default_double_free_action == 0 ) {
     // ignore silently
     return false;
@@ -162,8 +161,7 @@ sanitize_on_alloc([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
   if constexpr ( __default_sanitize ) {
     if ( sz == 0 ) {
       sz = __recover_size_from_hdr(addr);
-      if ( sz == 0 )
-        return;
+      if ( sz == 0 ) return;
     }
     micron::memset(addr, __default_sanitize_with_on_alloc, sz);
   } else {
@@ -177,8 +175,7 @@ zero_on_alloc([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
   if constexpr ( __default_zero_on_alloc ) {
     if ( sz == 0 ) {
       sz = __recover_size_from_hdr(addr);
-      if ( sz == 0 )
-        return;
+      if ( sz == 0 ) return;
     }
     micron::bzero(addr, sz);
   } else {
@@ -189,11 +186,10 @@ zero_on_alloc([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
 inline __attribute__((always_inline)) void
 poison_on_free([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
 {
-  if constexpr ( __default_poison_on_free ) {
+  if constexpr ( ABC_EFF_POISON_ON_FREE ) {
     if ( sz == 0 ) {
       sz = __recover_size_from_hdr(addr);
-      if ( sz == 0 )
-        return;
+      if ( sz == 0 ) return;
     }
     micron::memset(addr, __default_poison_byte, sz);
   } else {
@@ -207,8 +203,7 @@ zero_on_free([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
   if constexpr ( __default_zero_on_free ) {
     if ( sz == 0 ) {
       sz = __recover_size_from_hdr(addr);
-      if ( sz == 0 )
-        return;
+      if ( sz == 0 ) return;
     }
     micron::bzero(addr, sz);
   } else {
@@ -222,8 +217,7 @@ full_on_free([[maybe_unused]] byte *addr, [[maybe_unused]] usize sz = 0)
   if constexpr ( __default_full_on_free ) {
     if ( sz == 0 ) {
       sz = __recover_size_from_hdr(addr);
-      if ( sz == 0 )
-        return;
+      if ( sz == 0 ) return;
     }
     micron::memset(addr, 0xFF, sz);
   } else {
@@ -267,8 +261,7 @@ inline __attribute__((always_inline)) bool
 verify_redzone([[maybe_unused]] const byte *user_ptr, [[maybe_unused]] usize user_sz)
 {
   if constexpr ( __default_redzone ) {
-    if ( !verify_redzone_leading(user_ptr) )
-      return false;
+    if ( !verify_redzone_leading(user_ptr) ) return false;
     const byte *hi = user_ptr + user_sz;
     for ( usize i = 0; i < __default_redzone_size; ++i ) {
       if ( hi[i] != __default_redzone_byte ) {
@@ -302,8 +295,7 @@ check_ptr_valid(const addr_t *ptr)
 inline __attribute__((always_inline)) bool
 check_chunk_valid(const byte *ptr, usize len)
 {
-  if ( !check_ptr_valid(ptr) )
-    return false;
+  if ( !check_ptr_valid(ptr) ) return false;
   if ( len == 0 ) [[unlikely]] {
     __debug_print("check_chunk_valid(): zero-length chunk", 0);
     return false;
@@ -319,4 +311,4 @@ static_assert(!(__default_zero_on_alloc and __default_sanitize),
               "abcmalloc: __default_zero_on_alloc and __default_sanitize are mutually exclusive; "
               "zero fills with 0x00, sanitize fills with __default_sanitize_with_on_alloc; pick one");
 
-};     // namespace abc
+};      // namespace abc

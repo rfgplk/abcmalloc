@@ -31,7 +31,7 @@
 
 namespace abc
 {
-template <typename T, i64 Min, i32 Mx = 64>
+template<typename T, i64 Min, i32 Mx = 64>
   requires(micron::is_trivially_constructible_v<T> and micron::is_trivially_destructible_v<T> and (bool)((Min & (Min - 1)) == 0))
 struct __buddy_list {
 
@@ -69,7 +69,7 @@ struct __buddy_list {
   static constexpr i32 __cache_cap = 4;
   // ring of temporal-active addresses per order
   static constexpr i32 __active_ring = 2;
-  static constexpr i32 __cold_cap = 0;     // disabled when tombstoning is off interop is messy
+  static constexpr i32 __cold_cap = 0;      // disabled when tombstoning is off interop is messy
 
   // __log2_tbl[v] = ceil(log2(v))
   static constexpr u8 __log2_tbl[66] = {
@@ -82,14 +82,14 @@ struct __buddy_list {
   i64 max_order;
   usize allocated_bytes;
   usize tombstoned_bytes;
-  u64 free_mask;       // main bitmap for o(1): bit i set iff free_lists[i] != nullptr
-  u8 *block_tags;      // one tag per min-block
-  usize tag_count;     // == total >> __log2_min
+  u64 free_mask;        // main bitmap for o(1): bit i set iff free_lists[i] != nullptr
+  u8 *block_tags;       // one tag per min-block
+  usize tag_count;      // == total >> __log2_min
   bool tags_external;
-  usize order_sizes[Mx];     // order_sizes[i] = Min << i
+  usize order_sizes[Mx];      // order_sizes[i] = Min << i
   free_block *free_lists[Mx];
-  free_block *active[Mx][__active_ring];     // N active temporal blocks per order (rotated)
-  u8 active_rotor[Mx];                       // next slot to insert/return for order o
+  free_block *active[Mx][__active_ring];      // N active temporal blocks per order (rotated)
+  u8 active_rotor[Mx];                        // next slot to insert/return for order o
 
   free_block *tcache[Mx];
   i32 tcache_count[Mx];
@@ -108,8 +108,7 @@ struct __buddy_list {
   order_for_size(usize n) const noexcept
   {
     usize units = (n + Min - 1) >> __log2_min;
-    if ( units <= 1 )
-      return 0;
+    if ( units <= 1 ) return 0;
     return ceil_log2_u64(units);
   }
 
@@ -180,8 +179,7 @@ struct __buddy_list {
   find_free_order(i64 o) const noexcept
   {
     u64 m = free_mask >> o;
-    if ( m == 0 )
-      return max_order;
+    if ( m == 0 ) return max_order;
     return o + __builtin_ctzll(m);
   }
 
@@ -209,11 +207,9 @@ struct __buddy_list {
   __attribute__((always_inline)) inline bool
   __link_valid(const free_block *n) const noexcept
   {
-    if ( n == nullptr )
-      return true;
+    if ( n == nullptr ) return true;
     const byte *b = reinterpret_cast<const byte *>(n);
-    if ( b < base || b >= base + total )
-      return false;
+    if ( b < base || b >= base + total ) return false;
     return ((usize)(b - base) & (Min - 1)) == 0;
   }
 
@@ -224,8 +220,7 @@ struct __buddy_list {
     free_block *cur = free_lists[o];
     while ( cur ) {
       free_block *nx = cur->next;
-      if ( !__link_valid(nx) )
-        nx = nullptr;
+      if ( !__link_valid(nx) ) nx = nullptr;
       if ( (byte *)cur == buddy ) {
         if ( prev )
           prev->next = nx;
@@ -262,8 +257,7 @@ struct __buddy_list {
   __attribute__((always_inline)) inline free_block *
   tcache_pop(i64 o) noexcept
   {
-    if ( tcache_count[o] <= 0 )
-      return nullptr;
+    if ( tcache_count[o] <= 0 ) return nullptr;
     free_block *blk = tcache[o];
     free_block *__nx = blk->next;
     if ( __link_valid(__nx) ) {
@@ -272,15 +266,14 @@ struct __buddy_list {
     } else {
       tcache[o] = nullptr;
       tcache_count[o] = 0;
-    }     // hard drop corrupted cache tail
+    }      // hard drop corrupted cache tail
     return blk;
   }
 
   __attribute__((always_inline)) inline bool
   tcache_push(free_block *blk, i64 o) noexcept
   {
-    if ( tcache_count[o] >= __cache_cap )
-      return false;
+    if ( tcache_count[o] >= __cache_cap ) return false;
     blk->next = tcache[o];
     tcache[o] = blk;
     ++tcache_count[o];
@@ -303,15 +296,13 @@ struct __buddy_list {
   void
   tcache_flush_all() noexcept
   {
-    for ( i64 i = 0; i < max_order; ++i )
-      tcache_flush(i);
+    for ( i64 i = 0; i < max_order; ++i ) tcache_flush(i);
   }
 
   __attribute__((always_inline)) inline free_block *
   cold_pop(i64 o) noexcept
   {
-    if ( cold_count[o] <= 0 )
-      return nullptr;
+    if ( cold_count[o] <= 0 ) return nullptr;
     free_block *blk = cold_cache[o];
     free_block *__nx = blk->next;
     if ( __link_valid(__nx) ) {
@@ -320,15 +311,14 @@ struct __buddy_list {
     } else {
       cold_cache[o] = nullptr;
       cold_count[o] = 0;
-    }     // hard drop corrupted cache tail
+    }      // hard drop corrupted cache tail
     return blk;
   }
 
   __attribute__((always_inline)) inline bool
   cold_push(free_block *blk, i64 o) noexcept
   {
-    if ( cold_count[o] >= __cold_cap )
-      return false;
+    if ( cold_count[o] >= __cold_cap ) return false;
     blk->next = cold_cache[o];
     cold_cache[o] = blk;
     ++cold_count[o];
@@ -351,8 +341,7 @@ struct __buddy_list {
   void
   cold_flush_all() noexcept
   {
-    for ( i64 i = 0; i < max_order; ++i )
-      cold_drain_merge(i);
+    for ( i64 i = 0; i < max_order; ++i ) cold_drain_merge(i);
   }
 
   void
@@ -364,8 +353,7 @@ struct __buddy_list {
       usize blk_sz = order_sizes[o];
       usize buddy_off = off ^ blk_sz;
 
-      if ( !tag_is_free_at_off(buddy_off, o) )
-        break;
+      if ( !tag_is_free_at_off(buddy_off, o) ) break;
 
       freelist_remove(base + buddy_off, o);
       block_tags[buddy_off >> __log2_min] = __tag_none;
@@ -385,8 +373,7 @@ struct __buddy_list {
     for ( i64 i = 0; i < Mx; ++i ) {
       order_sizes[i] = (i < static_cast<i64>(sizeof(usize) * 8)) ? ((usize)Min << i) : 0;
       free_lists[i] = nullptr;
-      for ( i32 r = 0; r < __active_ring; ++r )
-        active[i][r] = nullptr;
+      for ( i32 r = 0; r < __active_ring; ++r ) active[i][r] = nullptr;
       active_rotor[i] = 0;
       tcache[i] = nullptr;
       tcache_count[i] = 0;
@@ -471,8 +458,7 @@ struct __buddy_list {
 
     __impl_zero_arrays();
 
-    for ( usize i = 0; i < tag_count; ++i )
-      block_tags[i] = __tag_none;
+    for ( usize i = 0; i < tag_count; ++i ) block_tags[i] = __tag_none;
 
     free_lists[max_order - 1] = (free_block *)base;
     free_lists[max_order - 1]->next = nullptr;
@@ -480,7 +466,7 @@ struct __buddy_list {
     tag_set_free(base, max_order - 1);
   }
 
-  ~__buddy_list() noexcept {}
+  ~__buddy_list() noexcept { }
 
   __buddy_list(void) = delete;
 
@@ -489,8 +475,7 @@ struct __buddy_list {
         tags_external(false)
   {
     __impl_zero_arrays();
-    if ( mem.zero() or mem.len < Min )
-      micron::abort();
+    if ( mem.zero() or mem.len < Min ) micron::abort();
     __impl_init_memory(mem.ptr, mem.len);
   }
 
@@ -499,8 +484,7 @@ struct __buddy_list {
         tags_external(true)
   {
     __impl_zero_arrays();
-    if ( mem.zero() or mem.len < Min )
-      micron::abort();
+    if ( mem.zero() or mem.len < Min ) micron::abort();
     __impl_init_memory(mem.ptr, mem.len, tag_buf);
   }
 
@@ -596,19 +580,16 @@ struct __buddy_list {
   allocate(usize n) noexcept
   {
     n += __hdr_offset;
-    if ( n == 0 )
-      n = 1;
-    if ( !base )
-      return { nullptr, 0 };
+    if ( n == 0 ) n = 1;
+    if ( !base ) return { nullptr, 0 };
     usize needed = (n + Min - 1) & ~(Min - 1);
     i64 o = order_for_size(needed);
-    if ( o >= max_order )
-      return { nullptr, 0 };
+    if ( o >= max_order ) return { nullptr, 0 };
 
     if ( free_block *cold = cold_pop(o) ) {
       block_header *hdr = hdr_of((byte *)cold, o);
       hdr->order = static_cast<i32>(o);
-      hdr->flags = __block_alloc;     // NOT temporal — non-temporal alloc
+      hdr->flags = __block_alloc;
       tag_set_alloc((byte *)cold, o);
       allocated_bytes += order_sizes[o];
       return { (byte *)cold, order_sizes[o] - __hdr_offset };
@@ -618,13 +599,12 @@ struct __buddy_list {
     if ( i >= max_order ) {
       cold_flush_all();
       i = find_free_order(o);
-      if ( i >= max_order )
-        return { nullptr, 0 };
+      if ( i >= max_order ) return { nullptr, 0 };
     }
 
     free_block *blk = free_lists[i];
     free_block *__nx = blk->next;
-    free_lists[i] = __link_valid(__nx) ? __nx : nullptr;     // hard contain a poisoned link
+    free_lists[i] = __link_valid(__nx) ? __nx : nullptr;      // hard contain a poisoned link
     mask_clear_if_empty(i);
 
     while ( i > o ) {
@@ -647,15 +627,12 @@ struct __buddy_list {
   temporal_allocate(usize n) noexcept
   {
     n += __hdr_offset;
-    if ( n == 0 )
-      n = 1;
-    if ( !base )
-      return { nullptr, 0 };
+    if ( n == 0 ) n = 1;
+    if ( !base ) return { nullptr, 0 };
 
     usize needed = (n + Min - 1) & ~(Min - 1);
     i64 o = order_for_size(needed);
-    if ( o >= max_order )
-      return { nullptr, 0 };
+    if ( o >= max_order ) return { nullptr, 0 };
 
     usize target_size = order_sizes[o];
 
@@ -687,12 +664,11 @@ struct __buddy_list {
     }
 
     i64 i = find_free_order(o);
-    if ( i >= max_order )
-      return { nullptr, 0 };
+    if ( i >= max_order ) return { nullptr, 0 };
 
     free_block *blk = free_lists[i];
     free_block *__nx = blk->next;
-    free_lists[i] = __link_valid(__nx) ? __nx : nullptr;     // hard contain a poisoned link
+    free_lists[i] = __link_valid(__nx) ? __nx : nullptr;      // hard contain a poisoned link
     mask_clear_if_empty(i);
 
     while ( i > o ) {
@@ -716,21 +692,16 @@ struct __buddy_list {
   T
   allocate_exact(usize n) noexcept
   {
-    if ( !base )
-      return { nullptr, 0 };
-    if ( n < Min )
-      return { nullptr, 0 };
-    if ( (n & (n - 1)) != 0 )
-      return { nullptr, 0 };
+    if ( !base ) return { nullptr, 0 };
+    if ( n < Min ) return { nullptr, 0 };
+    if ( (n & (n - 1)) != 0 ) return { nullptr, 0 };
     i64 o = order_for_size(n);
-    if ( o >= max_order )
-      return { nullptr, 0 };
-    if ( !free_lists[o] )
-      return { nullptr, 0 };
+    if ( o >= max_order ) return { nullptr, 0 };
+    if ( !free_lists[o] ) return { nullptr, 0 };
 
     free_block *blk = free_lists[o];
     free_block *__nx = blk->next;
-    free_lists[o] = __link_valid(__nx) ? __nx : nullptr;     // hard contain a poisoned link
+    free_lists[o] = __link_valid(__nx) ? __nx : nullptr;      // hard contain a poisoned link
     mask_clear_if_empty(o);
 
     block_header *hdr = hdr_of((byte *)blk, o);
@@ -745,14 +716,11 @@ struct __buddy_list {
   ret_flag
   tombstone(byte *ptr) noexcept
   {
-    if ( !is_allocated(ptr) )
-      return { __flag_invalid };
+    if ( !is_allocated(ptr) ) return { __flag_invalid };
     block_header *hdr = hdr_of_tagged(ptr);
     i64 o = static_cast<i64>(hdr->order);
-    if ( o < 0 || o >= max_order )
-      return { __flag_invalid };
-    if ( !(hdr->flags & __block_alloc) )
-      return { __flag_invalid };
+    if ( o < 0 || o >= max_order ) return { __flag_invalid };
+    if ( !(hdr->flags & __block_alloc) ) return { __flag_invalid };
 
     hdr->flags = __block_tombstone;
     allocated_bytes -= order_sizes[o];
@@ -764,13 +732,12 @@ struct __buddy_list {
   ret_flag
   tombstone(T &node) noexcept
   {
-    if ( !node.ptr or node.len == 0 )
-      return __flag_invalid;
+    if ( !node.ptr or node.len == 0 ) return __flag_invalid;
     return tombstone(node.ptr);
   }
 
   bool
-  is_tombstoned(byte *ptr) noexcept
+  is_tombstoned(byte *ptr) const noexcept
   {
     block_header *hdr = hdr_of_tagged(ptr);
     return (hdr->flags & __block_tombstone) != 0;
@@ -788,21 +755,16 @@ struct __buddy_list {
   {
     // WARNING: validate a min-block-aligned, authoritatively-allocated block START before any header access
     // protects against forged/out-of-range ptrs
-    if ( !is_allocated(ptr) )
-      return { __flag_invalid };
+    if ( !is_allocated(ptr) ) return { __flag_invalid };
     byte *addr = ptr;
     block_header *hdr = hdr_of_tagged(addr);
     const i64 original_o = static_cast<i64>(hdr->order);
-    if ( original_o < 0 || original_o >= max_order )
-      return { __flag_invalid };
-    if ( !base || !addr )
-      return __flag_failure;
-    if ( hdr->flags == __block_free )
-      return { __flag_invalid };
+    if ( original_o < 0 || original_o >= max_order ) return { __flag_invalid };
+    if ( !base || !addr ) return __flag_failure;
+    if ( hdr->flags == __block_free ) return { __flag_invalid };
 
     allocated_bytes -= order_sizes[original_o];
-    if ( hdr->flags & __block_tombstone )
-      tombstoned_bytes -= order_sizes[original_o];
+    if ( hdr->flags & __block_tombstone ) tombstoned_bytes -= order_sizes[original_o];
 
     bool was_temporal = (hdr->flags & __block_temporal) != 0;
     hdr->flags = __block_free;
@@ -831,29 +793,24 @@ struct __buddy_list {
   ret_flag
   deallocate(T &node) noexcept
   {
-    if ( !node.ptr or node.len == 0 )
-      return __flag_invalid;
+    if ( !node.ptr or node.len == 0 ) return __flag_invalid;
     return deallocate(node.ptr);
   }
 
   T
   reallocate(T node, usize new_size) noexcept
   {
-    if ( !base )
-      return { nullptr, 0 };
-    if ( !node.ptr )
-      return allocate(new_size);
+    if ( !base ) return { nullptr, 0 };
+    if ( !node.ptr ) return allocate(new_size);
     if ( new_size == 0 ) {
       deallocate(node);
       return { nullptr, 0 };
     }
 
-    if ( node.len >= new_size && new_size > (node.len >> 1) )
-      return node;
+    if ( node.len >= new_size && new_size > (node.len >> 1) ) return node;
 
     T nnode = allocate(new_size);
-    if ( !nnode.ptr )
-      return { nullptr, 0 };
+    if ( !nnode.ptr ) return { nullptr, 0 };
 
     usize to_copy = (node.len < nnode.len) ? node.len : nnode.len;
     micron::memcpy(nnode.ptr, node.ptr, to_copy);
@@ -864,8 +821,7 @@ struct __buddy_list {
   usize
   available() const noexcept
   {
-    if ( !base )
-      return 0;
+    if ( !base ) return 0;
     return total - allocated_bytes;
   }
 
@@ -890,24 +846,19 @@ struct __buddy_list {
   usize
   block_size(byte *ptr) const noexcept
   {
-    if ( !base || !ptr )
-      return 0;
-    if ( ptr < base || ptr >= base + total )
-      return 0;
+    if ( !base || !ptr ) return 0;
+    if ( ptr < base || ptr >= base + total ) return 0;
     u8 tag = block_tags[tag_index(ptr)];
     i64 o = static_cast<i64>(tag & ~__tag_free);
-    if ( (u64)o >= (u64)max_order )
-      return 0;
+    if ( (u64)o >= (u64)max_order ) return 0;
     return order_sizes[o];
   }
 
   bool
   is_allocated(byte *ptr) const noexcept
   {
-    if ( !ptr || !base || ptr < base || ptr >= base + total )
-      return false;
-    if ( ((usize)(ptr - base) & (Min - 1)) != 0 )
-      return false;
+    if ( !ptr || !base || ptr < base || ptr >= base + total ) return false;
+    if ( ((usize)(ptr - base) & (Min - 1)) != 0 ) return false;
     u8 tag = block_tags[tag_index(ptr)];
     return (tag & __tag_free) == 0 && tag < (u8)max_order;
   }
@@ -915,9 +866,114 @@ struct __buddy_list {
   usize
   allocated_size(byte *ptr) const noexcept
   {
-    if ( !is_allocated(ptr) )
-      return 0;
+    if ( !is_allocated(ptr) ) return 0;
     return block_size(ptr);
   }
+
+#if defined(ABCMALLOC_DOCTOR_HELP)
+  // deep corruption walk
+  template<class V>
+  void
+  __doctor_walk(V &v)
+  {
+    if ( !base || !block_tags ) return;
+
+    usize idx = 0;
+    usize guard = 0;
+    const usize maxg = tag_count + 4;
+    while ( idx < tag_count && guard++ < maxg ) {
+      u8 tag = block_tags[idx];
+      if ( tag == __tag_none ) {      // interior/padding at a boundary; skip one min-block
+        ++idx;
+        continue;
+      }
+      i64 o = static_cast<i64>(tag & ~__tag_free);
+      byte *blk = base + (idx << __log2_min);
+      ++v.blocks;
+      if ( o < 0 || o >= max_order ) {
+        v.note("buddy: block tag order out of range", blk);
+        ++idx;
+        continue;
+      }
+      usize osz = order_sizes[o];
+      if ( (usize)(blk - base) + osz > total ) {
+        v.note("buddy: block extends past sheet bounds", blk);
+        break;
+      }
+      if ( ((usize)(blk - base) & (osz - 1)) != 0 ) v.note("buddy: block not aligned to its order size", blk);
+
+      const bool tag_free = (tag & __tag_free) != 0;
+      // the tail block_header is a maintained redundant copy
+      // only for allocated blocks
+      if ( !tag_free ) {
+        block_header *h = hdr_of(blk, o);
+        if ( h->order != static_cast<i32>(o) ) {
+          v.note("buddy: allocated block tail header order != block_tags order", blk);
+          if ( v.repair ) {
+            h->order = static_cast<i32>(o);
+            v.did_repair("buddy: rewrote tail header order from tag", blk);
+          }
+        }
+        const bool flags_alloc
+            = (h->flags == __block_alloc || h->flags == (__block_alloc | __block_temporal) || h->flags == __block_tombstone);
+        if ( !flags_alloc ) {
+          v.note("buddy: allocated block tail header flags not allocated", blk);
+          if ( v.repair ) {
+            h->flags = __block_alloc | (h->flags & __block_temporal);
+            v.did_repair("buddy: reset tail header flags to allocated form", blk);
+          }
+        }
+      }
+      idx += (osz >> __log2_min);
+    }
+    if ( guard >= maxg ) v.note("buddy: tiling walk overran (corrupt tag stream)", base);
+
+    // per order free lists
+    for ( i64 o = 0; o < max_order; ++o ) {
+      const bool has = (free_lists[o] != nullptr);
+      const bool bit = ((free_mask >> o) & 1u) != 0;
+      if ( has != bit ) {
+        v.note("buddy: free_mask bit disagrees with free_lists[o]", base);
+        if ( v.repair ) {
+          if ( has )
+            free_mask |= (u64(1) << o);
+          else
+            free_mask &= ~(u64(1) << o);
+          v.did_repair("buddy: fixed free_mask bit", base);
+        }
+      }
+      free_block *n = free_lists[o];
+      free_block *prev = nullptr;
+      usize gc = 0;
+      while ( n && gc++ < tag_count + 4 ) {
+        ++v.freelist_nodes;
+        if ( !__link_valid(n) ) {
+          v.note("buddy: free-list node out of bounds / misaligned", n);
+          if ( v.repair ) {
+            if ( prev )
+              prev->next = nullptr;
+            else
+              free_lists[o] = nullptr;
+            mask_clear_if_empty(o);
+            v.did_repair("buddy: truncated free-list at bad node", n);
+          }
+          break;
+        }
+        if ( !tag_is_free_at(reinterpret_cast<byte *>(n), o) ) v.note("buddy: free-list node not tagged free at its order", n);
+        if ( n->next && !__link_valid(n->next) ) {
+          v.note("buddy: forged free-list next link", n);
+          if ( v.repair ) {
+            n->next = nullptr;
+            v.did_repair("buddy: nulled forged free-list link", n);
+          }
+          break;
+        }
+        prev = n;
+        n = n->next;
+      }
+      if ( gc >= tag_count + 4 ) v.note("buddy: free-list cycle / overrun at order", base);
+    }
+  }
+#endif
 };
-};     // namespace abc
+};      // namespace abc

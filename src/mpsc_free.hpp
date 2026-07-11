@@ -37,7 +37,7 @@ struct __mpsc_free_payload {
   usize size;
 };
 
-template <usize N>
+template<usize N>
   requires(N > 0 and (N & (N - 1)) == 0)
 class __mpsc_free_queue
 {
@@ -58,8 +58,7 @@ class __mpsc_free_queue
   [[gnu::always_inline]] static inline unsigned
   __spin_backoff(unsigned b) noexcept
   {
-    for ( unsigned i = 0; i < b; ++i )
-      __cpu_pause();
+    for ( unsigned i = 0; i < b; ++i ) __cpu_pause();
     return (b < 64u) ? (b << 1u) : 64u;
   }
 
@@ -122,15 +121,14 @@ public:
     __cell &c = __cells[head & __mask];
     const usize seq = c.seq.get(micron::memory_order_acquire);
     const long long diff = static_cast<long long>(seq) - static_cast<long long>(head + 1u);
-    if ( diff != 0 )
-      return false;
+    if ( diff != 0 ) return false;
     out = c.payload;
     c.seq.store(head + __capacity, micron::memory_order_release);
     __head = head + 1u;
     return true;
   }
 
-  template <typename Fn>
+  template<typename Fn>
   [[gnu::always_inline]] inline u32
   drain(Fn &&fn) noexcept
   {
@@ -144,4 +142,4 @@ public:
   }
 };
 
-};     // namespace abc
+};      // namespace abc

@@ -39,7 +39,7 @@ extern "C" void free(void *ptr) noexcept;
 namespace abc
 {
 
-template <typename T>
+template<typename T>
   requires(micron::is_integral_v<T>)
 struct __abc_allocator {
   static auto
@@ -59,12 +59,11 @@ struct __abc_allocator {
   };
 
   static T *
-  alloc(usize n)     // allocate 'smartly'
+  alloc(usize n)      // allocate 'smartly'
   {
 #if defined(__micron_sanitizer_owns_heap)
     T *ptr = reinterpret_cast<T *>(::malloc(n));
-    if ( ptr == nullptr )
-      micron::exc<micron::except::critical_error>("abc_allocator::alloc(): sanitizer malloc failed to satisfy request");
+    if ( ptr == nullptr ) micron::exc<micron::except::critical_error>("abc_allocator::alloc(): sanitizer malloc failed to satisfy request");
     return ptr;
 #else
     T *ptr = abc::alloc(n);
@@ -76,9 +75,8 @@ struct __abc_allocator {
 
   static void
   dealloc(T *mem, usize len)
-  {     // deallocate at location N
-    if ( mem == nullptr )
-      micron::exc<micron::except::critical_error>("abc_allocator::dealloc(): nullptr was provided");
+  {      // deallocate at location N
+    if ( mem == nullptr ) micron::exc<micron::except::critical_error>("abc_allocator::dealloc(): nullptr was provided");
 #if defined(__micron_sanitizer_owns_heap)
     (void)len;
     ::free(mem);
@@ -89,4 +87,4 @@ struct __abc_allocator {
   }
 };
 
-};     // namespace abc
+};      // namespace abc

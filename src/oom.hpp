@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "config.hpp"
 #include <micron/linux/sys/sysinfo.hpp>
+#include "config.hpp"
 
 namespace abc
 {
@@ -52,4 +52,4 @@ check_oom(void) -> bool
   return false;
 }
 
-};     // namespace abc
+};      // namespace abc

@@ -21,9 +21,9 @@
 
 #pragma once
 
-#include "va_reserve.hpp"
 #include <micron/atomic/atomic.hpp>
 #include <micron/types.hpp>
+#include "va_reserve.hpp"
 
 namespace abc
 {
@@ -44,8 +44,7 @@ __block_index(const void *p) noexcept
 inline void
 __sheet_register(__arena *arena, const void *base, usize len) noexcept
 {
-  if ( !__va_contains(base) )
-    return;
+  if ( !__va_contains(base) ) return;
   const u64 first = __block_index(base);
   const usize blocks = (len + __sheet_align_mask) >> __sheet_align_log2;
   for ( usize i = 0; i < blocks; ++i ) {
@@ -56,8 +55,7 @@ __sheet_register(__arena *arena, const void *base, usize len) noexcept
 inline void
 __sheet_unregister(const void *base, usize len) noexcept
 {
-  if ( !__va_contains(base) )
-    return;
+  if ( !__va_contains(base) ) return;
   const u64 first = __block_index(base);
   const usize blocks = (len + __sheet_align_mask) >> __sheet_align_log2;
   for ( usize i = 0; i < blocks; ++i ) {
@@ -68,9 +66,8 @@ __sheet_unregister(const void *base, usize len) noexcept
 [[gnu::always_inline]] inline __arena *
 __owner_of(const void *p) noexcept
 {
-  if ( !__va_contains(p) )
-    return nullptr;
+  if ( !__va_contains(p) ) return nullptr;
   return __atomic_load_n(&__block_owner_table[__block_index(p)], __ATOMIC_ACQUIRE);
 }
 
-};     // namespace abc
+};      // namespace abc

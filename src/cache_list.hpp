@@ -46,17 +46,17 @@ namespace abc
 //    offset 24: free-list link
 //    offset 32: meta
 
-template <typename T, i64 Min, i32 Mx = 64>
+template<typename T, i64 Min, i32 Mx = 64>
   requires(micron::is_trivially_constructible_v<T> and micron::is_trivially_destructible_v<T> and (bool)((Min & (Min - 1)) == 0))
 struct __tlsf_list {
 
-  static constexpr usize __block_align = __hdr_offset;        // 32
-  static constexpr usize __min_block = __block_align * 2;     // 64
+  static constexpr usize __block_align = __hdr_offset;         // 32
+  static constexpr usize __min_block = __block_align * 2;      // 64
   static constexpr i32 __sl_log2 = 4;
-  static constexpr i32 __sl_count = 1 << __sl_log2;                // 16
-  static constexpr i32 __fl_shift = 6;                             // log2(64)
-  static constexpr i32 __fl_count = 26;                            // indices 0..25
-  static constexpr i32 __list_count = __fl_count * __sl_count;     // 416
+  static constexpr i32 __sl_count = 1 << __sl_log2;                 // 16
+  static constexpr i32 __fl_shift = 6;                              // log2(64)
+  static constexpr i32 __fl_count = 26;                             // indices 0..25
+  static constexpr i32 __list_count = __fl_count * __sl_count;      // 416
   static constexpr i32 __temporal_ring = 2;
 
   static_assert(__block_align >= 32, "header must fit in __hdr_offset");
@@ -74,16 +74,16 @@ struct __tlsf_list {
 
   static_assert(sizeof(tlsf_hdr) <= __hdr_offset, "tlsf_hdr must fit in __hdr_offset bytes");
 
-  byte *base;       // pool start (= start sentinel address)
-  usize total;      // data-region size between sentinels
-  i32 fl_count;     // runtime FL levels used
+  byte *base;        // pool start (= start sentinel address)
+  usize total;       // data-region size between sentinels
+  i32 fl_count;      // runtime FL levels used
   usize allocated_bytes;
   usize tombstoned_bytes;
-  u32 fl_bitmap;                                                // first-level bitmap
-  u32 sl_bitmap[__fl_count];                                    // second-level bitmaps
-  tlsf_hdr *heads[__list_count];                                // free-list heads  [fi * __sl_count + si]
-  tlsf_hdr *temporal_active[__list_count][__temporal_ring];     // N active temporal blocks per class (rotated)
-  u8 temporal_rotor[__list_count];                              // next slot to insert/return for class i
+  u32 fl_bitmap;                                                 // first-level bitmap
+  u32 sl_bitmap[__fl_count];                                     // second-level bitmaps
+  tlsf_hdr *heads[__list_count];                                 // free-list heads  [fi * __sl_count + si]
+  tlsf_hdr *temporal_active[__list_count][__temporal_ring];      // N active temporal blocks per class (rotated)
+  u8 temporal_rotor[__list_count];                               // next slot to insert/return for class i
 
   __attribute__((always_inline)) static inline usize
   align_up(usize v, usize a) noexcept
@@ -142,8 +142,7 @@ struct __tlsf_list {
     tlsf_hdr *head = heads[i];
     block->next_free = head;
     block->prev_free = nullptr;
-    if ( head )
-      head->prev_free = block;
+    if ( head ) head->prev_free = block;
     heads[i] = block;
 
     block->flags = __block_free;
@@ -163,13 +162,11 @@ struct __tlsf_list {
     else
       heads[i] = block->next_free;
 
-    if ( block->next_free )
-      block->next_free->prev_free = block->prev_free;
+    if ( block->next_free ) block->next_free->prev_free = block->prev_free;
 
     if ( !heads[i] ) {
       sl_bitmap[fi] &= ~(1u << si);
-      if ( !sl_bitmap[fi] )
-        fl_bitmap &= ~(1u << fi);
+      if ( !sl_bitmap[fi] ) fl_bitmap &= ~(1u << fi);
     }
   }
 
@@ -178,15 +175,13 @@ struct __tlsf_list {
   {
     i32 fi, si;
     mapping_search(needed, fi, si);
-    if ( fi >= fl_count )
-      return nullptr;
+    if ( fi >= fl_count ) return nullptr;
 
     u32 sl_map = sl_bitmap[fi] & (~0u << si);
     if ( !sl_map ) {
 
       u32 fl_map = fl_bitmap & (~0u << (fi + 1));
-      if ( !fl_map )
-        return nullptr;
+      if ( !fl_map ) return nullptr;
       fi = __builtin_ctz(fl_map);
       sl_map = sl_bitmap[fi];
     }
@@ -201,8 +196,7 @@ struct __tlsf_list {
   try_split(tlsf_hdr *block, usize needed) noexcept
   {
     usize remain = (usize)block->bsize - needed;
-    if ( remain < __min_block )
-      return;
+    if ( remain < __min_block ) return;
 
     block->bsize = (u32)needed;
 
@@ -246,12 +240,10 @@ struct __tlsf_list {
   __impl_zero_arrays() noexcept
   {
     fl_bitmap = 0;
-    for ( i32 i = 0; i < __fl_count; ++i )
-      sl_bitmap[i] = 0;
+    for ( i32 i = 0; i < __fl_count; ++i ) sl_bitmap[i] = 0;
     for ( i32 i = 0; i < __list_count; ++i ) {
       heads[i] = nullptr;
-      for ( i32 r = 0; r < __temporal_ring; ++r )
-        temporal_active[i][r] = nullptr;
+      for ( i32 r = 0; r < __temporal_ring; ++r ) temporal_active[i][r] = nullptr;
       temporal_rotor[i] = 0;
     }
   }
@@ -262,31 +254,26 @@ struct __tlsf_list {
     uintptr_t p = (uintptr_t)_ptr;
     uintptr_t r = align_up(p, __block_align);
     usize adjust = r - p;
-    if ( _len <= adjust )
-      goto fail;
+    if ( _len <= adjust ) goto fail;
     {
       byte *aligned = (byte *)r;
       usize usable = _len - adjust;
       usable = (usable / __block_align) * __block_align;
 
       // need start-sentinel + at least __min_block + end-sentinel
-      if ( usable < 2 * __block_align + __min_block )
-        goto fail;
+      if ( usable < 2 * __block_align + __min_block ) goto fail;
 
       // reject pools > 4 GiB
       usize data = usable - 2 * __block_align;
-      if ( data > (usize)0xFFFFFFFFu )
-        goto fail;
+      if ( data > (usize)0xFFFFFFFFu ) goto fail;
 
       base = aligned;
       total = data;
 
       i32 fl = fls64(total);
       fl_count = fl - __fl_shift + 1;
-      if ( fl_count > __fl_count )
-        fl_count = __fl_count;
-      if ( fl_count < 1 )
-        fl_count = 1;
+      if ( fl_count > __fl_count ) fl_count = __fl_count;
+      if ( fl_count < 1 ) fl_count = 1;
 
       __impl_zero_arrays();
 
@@ -326,12 +313,11 @@ struct __tlsf_list {
   __tlsf_list(const T &mem) noexcept : base(nullptr), total(0), fl_count(0), allocated_bytes(0), tombstoned_bytes(0), fl_bitmap(0)
   {
     __impl_zero_arrays();
-    if ( mem.zero() or mem.len < (usize)Min )
-      micron::abort();
+    if ( mem.zero() or mem.len < (usize)Min ) micron::abort();
     __impl_init_memory(mem.ptr, mem.len);
   }
 
-  __tlsf_list(const T &mem, u8 *) noexcept : __tlsf_list(mem) {}
+  __tlsf_list(const T &mem, u8 *) noexcept : __tlsf_list(mem) { }
 
   __tlsf_list(const __tlsf_list &) = delete;
 
@@ -409,16 +395,13 @@ struct __tlsf_list {
   allocate(usize n) noexcept
   {
     n += sizeof(micron::simd::i256);
-    if ( n == 0 )
-      n = 1;
-    if ( !base )
-      return { nullptr, 0 };
+    if ( n == 0 ) n = 1;
+    if ( !base ) return { nullptr, 0 };
 
     usize needed = adjusted_block_size(n);
 
     tlsf_hdr *block = find_free(needed);
-    if ( !block )
-      return { nullptr, 0 };
+    if ( !block ) return { nullptr, 0 };
 
     try_split(block, needed);
     block->flags = __block_alloc;
@@ -431,10 +414,8 @@ struct __tlsf_list {
   temporal_allocate(usize n) noexcept
   {
     n += sizeof(micron::simd::i256);
-    if ( n == 0 )
-      n = 1;
-    if ( !base )
-      return { nullptr, 0 };
+    if ( n == 0 ) n = 1;
+    if ( !base ) return { nullptr, 0 };
 
     usize needed = adjusted_block_size(n);
 
@@ -459,8 +440,7 @@ struct __tlsf_list {
     }
 
     tlsf_hdr *block = find_free(needed);
-    if ( !block )
-      return { nullptr, 0 };
+    if ( !block ) return { nullptr, 0 };
 
     try_split(block, needed);
     block->flags = __block_alloc | __block_temporal;
@@ -479,21 +459,16 @@ struct __tlsf_list {
   T
   allocate_exact(usize n) noexcept
   {
-    if ( !base )
-      return { nullptr, 0 };
-    if ( n < __min_block )
-      return { nullptr, 0 };
-    if ( (n & (n - 1)) != 0 )
-      return { nullptr, 0 };
+    if ( !base ) return { nullptr, 0 };
+    if ( n < __min_block ) return { nullptr, 0 };
+    if ( (n & (n - 1)) != 0 ) return { nullptr, 0 };
 
     i32 fi, si;
     mapping_insert(n, fi, si);
-    if ( fi < 0 || fi >= fl_count )
-      return { nullptr, 0 };
+    if ( fi < 0 || fi >= fl_count ) return { nullptr, 0 };
 
     i32 i = idx(fi, si);
-    if ( !heads[i] )
-      return { nullptr, 0 };
+    if ( !heads[i] ) return { nullptr, 0 };
 
     tlsf_hdr *block = heads[i];
     fl_remove(block);
@@ -507,8 +482,7 @@ struct __tlsf_list {
   tombstone(byte *ptr) noexcept
   {
     tlsf_hdr *hdr = reinterpret_cast<tlsf_hdr *>(ptr - __hdr_offset);
-    if ( !(hdr->flags & __block_alloc) )
-      return { __flag_invalid };
+    if ( !(hdr->flags & __block_alloc) ) return { __flag_invalid };
 
     usize bsz = (usize)hdr->bsize;
     hdr->flags = __block_tombstone;
@@ -521,15 +495,14 @@ struct __tlsf_list {
   ret_flag
   tombstone(T &node) noexcept
   {
-    if ( !node.ptr or node.len == 0 )
-      return __flag_invalid;
+    if ( !node.ptr or node.len == 0 ) return __flag_invalid;
     return tombstone(node.ptr);
   }
 
   bool
-  is_tombstoned(byte *ptr) noexcept
+  is_tombstoned(byte *ptr) const noexcept
   {
-    tlsf_hdr *hdr = reinterpret_cast<tlsf_hdr *>(ptr - __hdr_offset);
+    const tlsf_hdr *hdr = reinterpret_cast<const tlsf_hdr *>(ptr - __hdr_offset);
     return (hdr->flags & __block_tombstone) != 0;
   }
 
@@ -543,18 +516,15 @@ struct __tlsf_list {
   ret_flag
   deallocate(byte *ptr) noexcept
   {
-    if ( !ptr || !base )
-      return __flag_failure;
+    if ( !ptr || !base ) return __flag_failure;
 
     tlsf_hdr *block = reinterpret_cast<tlsf_hdr *>(ptr - __hdr_offset);
     usize bsz = (usize)block->bsize;
 
-    if ( block->flags == __block_free )
-      return { __flag_invalid };
+    if ( block->flags == __block_free ) return { __flag_invalid };
 
     allocated_bytes -= bsz;
-    if ( block->flags & __block_tombstone )
-      tombstoned_bytes -= bsz;
+    if ( block->flags & __block_tombstone ) tombstoned_bytes -= bsz;
 
     if ( block->flags & __block_temporal ) {
       for ( i32 c = 0; c < __list_count; ++c ) {
@@ -575,29 +545,24 @@ struct __tlsf_list {
   ret_flag
   deallocate(T &node) noexcept
   {
-    if ( !node.ptr or node.len == 0 )
-      return __flag_invalid;
+    if ( !node.ptr or node.len == 0 ) return __flag_invalid;
     return deallocate(node.ptr);
   }
 
   T
   reallocate(T node, usize new_size) noexcept
   {
-    if ( !base )
-      return { nullptr, 0 };
-    if ( !node.ptr )
-      return allocate(new_size);
+    if ( !base ) return { nullptr, 0 };
+    if ( !node.ptr ) return allocate(new_size);
     if ( new_size == 0 ) {
       deallocate(node);
       return { nullptr, 0 };
     }
 
-    if ( node.len >= new_size && new_size > (node.len >> 1) )
-      return node;
+    if ( node.len >= new_size && new_size > (node.len >> 1) ) return node;
 
     T nnode = allocate(new_size);
-    if ( !nnode.ptr )
-      return { nullptr, 0 };
+    if ( !nnode.ptr ) return { nullptr, 0 };
 
     usize to_copy = (node.len < nnode.len) ? node.len : nnode.len;
     micron::memcpy(nnode.ptr, node.ptr, to_copy);
@@ -608,8 +573,7 @@ struct __tlsf_list {
   usize
   available() const noexcept
   {
-    if ( !base )
-      return 0;
+    if ( !base ) return 0;
     return total - allocated_bytes;
   }
 
@@ -634,13 +598,11 @@ struct __tlsf_list {
   usize
   block_size(byte *ptr) const noexcept
   {
-    if ( !base || !ptr )
-      return 0;
+    if ( !base || !ptr ) return 0;
     byte *data_lo = base + __block_align;
     byte *data_hi = base + __block_align + total;
     byte *blk = ptr - __hdr_offset;
-    if ( blk < data_lo || blk >= data_hi )
-      return 0;
+    if ( blk < data_lo || blk >= data_hi ) return 0;
     const tlsf_hdr *hdr = reinterpret_cast<const tlsf_hdr *>(blk);
     return (usize)hdr->bsize;
   }
@@ -648,13 +610,11 @@ struct __tlsf_list {
   bool
   is_allocated(byte *ptr) const noexcept
   {
-    if ( !ptr || !base )
-      return false;
+    if ( !ptr || !base ) return false;
     byte *data_lo = base + __block_align;
     byte *data_hi = base + __block_align + total;
     byte *blk = ptr - __hdr_offset;
-    if ( blk < data_lo || blk >= data_hi )
-      return false;
+    if ( blk < data_lo || blk >= data_hi ) return false;
     const tlsf_hdr *hdr = reinterpret_cast<const tlsf_hdr *>(blk);
 
     return hdr->flags != __block_free;
@@ -663,10 +623,120 @@ struct __tlsf_list {
   usize
   allocated_size(byte *ptr) const noexcept
   {
-    if ( !is_allocated(ptr) )
-      return 0;
+    if ( !is_allocated(ptr) ) return 0;
     return block_size(ptr);
   }
+
+#if defined(ABCMALLOC_DOCTOR_HELP)
+  // deep corruption walk
+  template<class V>
+  void
+  __doctor_walk(V &v)
+  {
+    if ( !base ) return;
+    byte *data_lo = base + __block_align;
+    byte *es_addr = base + __block_align + total;
+
+    // sentinels
+    tlsf_hdr *ss = reinterpret_cast<tlsf_hdr *>(base);
+    if ( ss->bsize != (u32)__block_align || ss->flags != __block_alloc ) v.note("tlsf: start sentinel corrupt", base);
+    tlsf_hdr *es = reinterpret_cast<tlsf_hdr *>(es_addr);
+    if ( es->bsize != (u32)__block_align || es->flags != __block_alloc ) v.note("tlsf: end sentinel corrupt", es_addr);
+
+    // physical block chain via next_phys
+    tlsf_hdr *cur = reinterpret_cast<tlsf_hdr *>(data_lo);
+    tlsf_hdr *prev = ss;
+    usize guard = 0;
+    const usize maxg = (total / __min_block) + 8;
+    while ( reinterpret_cast<byte *>(cur) < es_addr && guard++ < maxg ) {
+      byte *cb = reinterpret_cast<byte *>(cur);
+      ++v.blocks;
+      u32 bs = cur->bsize;
+      if ( bs == 0 || (bs & (__block_align - 1)) != 0 ) {
+        v.note("tlsf: block bsize zero or misaligned", cb);
+        break;
+      }
+      if ( cb + bs > es_addr ) {
+        v.note("tlsf: block extends past data region", cb);
+        break;
+      }
+      const bool flags_known = (cur->flags == __block_free || cur->flags == __block_alloc || cur->flags == __block_tombstone
+                                || cur->flags == (__block_alloc | __block_temporal));
+      if ( !flags_known ) v.note("tlsf: block flags not a valid block_flags", cb);
+      if ( cur->prev_phys != prev ) {
+        v.note("tlsf: prev_phys back-link mismatch", cb);
+        if ( v.repair ) {
+          cur->prev_phys = prev;
+          v.did_repair("tlsf: fixed prev_phys back-link", cb);
+        }
+      }
+      tlsf_hdr *nx = next_phys(cur);
+      if ( cur->flags == __block_free && reinterpret_cast<byte *>(nx) < es_addr && nx->flags == __block_free )
+        v.note("tlsf: adjacent free blocks (missed coalescing)", cb);
+      prev = cur;
+      cur = nx;
+    }
+    if ( guard >= maxg )
+      v.note("tlsf: physical walk overran (corrupt bsize chain)", base);
+    else if ( es->prev_phys != prev )
+      v.note("tlsf: end sentinel prev_phys != last block", es_addr);
+
+    for ( i32 fi = 0; fi < __fl_count; ++fi ) {
+      u32 want_sl = 0;
+      for ( i32 si = 0; si < __sl_count; ++si )
+        if ( heads[idx(fi, si)] != nullptr ) want_sl |= (1u << si);
+      if ( sl_bitmap[fi] != want_sl ) {
+        if ( v.repair ) {
+          sl_bitmap[fi] = want_sl;
+          v.did_repair("tlsf: recomputed sl_bitmap from heads", base);
+        } else
+          v.note("tlsf: sl_bitmap disagrees with heads[]", base);
+      }
+    }
+    u32 want_fl = 0;
+    for ( i32 fi = 0; fi < __fl_count; ++fi )
+      if ( sl_bitmap[fi] ) want_fl |= (1u << fi);
+    if ( fl_bitmap != want_fl ) {
+      if ( v.repair ) {
+        fl_bitmap = want_fl;
+        v.did_repair("tlsf: recomputed fl_bitmap from sl_bitmap", base);
+      } else
+        v.note("tlsf: fl_bitmap disagrees with sl_bitmap", base);
+    }
+
+    for ( i32 i = 0; i < __list_count; ++i ) {
+      tlsf_hdr *n = heads[i];
+      tlsf_hdr *pr = nullptr;
+      usize gc = 0;
+      while ( n && gc++ < maxg ) {
+        ++v.freelist_nodes;
+        byte *nb = reinterpret_cast<byte *>(n);
+        if ( nb < data_lo || nb >= es_addr ) {
+          v.note("tlsf: free-list node out of bounds", n);
+          if ( v.repair ) {
+            if ( pr )
+              pr->next_free = nullptr;
+            else
+              heads[i] = nullptr;
+            v.did_repair("tlsf: truncated free-list at bad node", n);
+          }
+          break;
+        }
+        if ( n->flags != __block_free ) v.note("tlsf: free-list node not flagged free", n);
+        if ( n->prev_free != pr ) {
+          v.note("tlsf: free-list prev_free back-link mismatch", n);
+          if ( v.repair ) {
+            n->prev_free = pr;
+            v.did_repair("tlsf: fixed prev_free back-link", n);
+          }
+        }
+        pr = n;
+        n = n->next_free;
+      }
+      if ( gc >= maxg ) v.note("tlsf: free-list cycle / overrun", base);
+    }
+  }
+#endif
 };
 
-};     // namespace abc
+};      // namespace abc

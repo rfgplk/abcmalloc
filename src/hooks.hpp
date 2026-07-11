@@ -23,7 +23,6 @@
 
 #include <micron/math/generic.hpp>
 #include <micron/types.hpp>
-
 #include "__sys.hpp"
 #include "config.hpp"
 #include "va_reserve.hpp"
@@ -31,13 +30,20 @@
 namespace abc
 {
 // NOTE: u64 and usize are the same on amd64 but NOT on 32-bit targets (armv7 has u64 defined but usize is __UINTPTR__ (32b))
+#if defined(__micron_arch_width_32)
+// largest single sheet a width-32 target will request
+constexpr static const u64 __width32_sheet_cap = 64ULL << 20;
+#endif
+
 static inline usize
 __saturate_pages_to_bytes(u64 pages) noexcept
 {
   const u64 ps = static_cast<u64>(__system_pagesize);
   const u64 max_usize = static_cast<u64>(micron::numeric_limits<usize>::max());
-  if ( pages > max_usize / ps )
-    return static_cast<usize>(max_usize & ~(ps - 1));
+#if defined(__micron_arch_width_32)
+  if ( pages > __width32_sheet_cap / ps ) return static_cast<usize>(__width32_sheet_cap);
+#endif
+  if ( pages > max_usize / ps ) return static_cast<usize>(max_usize & ~(ps - 1));
   return static_cast<usize>(pages * ps);
 }
 
@@ -45,12 +51,12 @@ inline usize
 __calculate_space_cache(usize sz)
 {
   // x^2 * ln(x * sqrt(x))
-  u64 t = static_cast<u64>((float)(sz * sz) * micron::math::logf128((double)sz * __builtin_sqrt((double)sz)));
+  // WARNING: square in double; usize sz*sz wraps at sz >= 2^16 on width-32
+  u64 t = static_cast<u64>((double)sz * (double)sz * micron::math::logf128((double)sz * __builtin_sqrt((double)sz)));
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
   u64 pages = static_cast<u64>(t_2);
-  if ( pages < __default_minimum_page_mul )
-    pages = __default_minimum_page_mul;
+  if ( pages < __default_minimum_page_mul ) pages = __default_minimum_page_mul;
   pages = micron::math::nearest_pow2ll(pages);
   return __saturate_pages_to_bytes(pages);
 }
@@ -63,8 +69,7 @@ __calculate_space_small(usize sz)
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
   u64 pages = static_cast<u64>(t_2);
-  if ( pages < __default_minimum_page_mul )
-    pages = __default_minimum_page_mul;
+  if ( pages < __default_minimum_page_mul ) pages = __default_minimum_page_mul;
   pages = micron::math::nearest_pow2ll(pages);
   return __saturate_pages_to_bytes(pages);
 }
@@ -78,8 +83,7 @@ __calculate_space_medium(usize sz)
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
   u64 pages = static_cast<u64>(t_2);
-  if ( pages < __default_minimum_page_mul )
-    pages = __default_minimum_page_mul;
+  if ( pages < __default_minimum_page_mul ) pages = __default_minimum_page_mul;
   pages = micron::math::nearest_pow2ll(pages);
   return __saturate_pages_to_bytes(pages);
 }
@@ -94,8 +98,7 @@ __calculate_space_large(usize sz)
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
   u64 pages = static_cast<u64>(t_2);
-  if ( pages < __default_minimum_page_mul )
-    pages = __default_minimum_page_mul;
+  if ( pages < __default_minimum_page_mul ) pages = __default_minimum_page_mul;
   pages = micron::math::nearest_pow2ll(pages);
   return __saturate_pages_to_bytes(pages);
 }
@@ -110,8 +113,7 @@ __calculate_space_huge(usize sz)
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
   u64 pages = static_cast<u64>(t_2);
-  if ( pages < __default_minimum_page_mul )
-    pages = __default_minimum_page_mul;
+  if ( pages < __default_minimum_page_mul ) pages = __default_minimum_page_mul;
   pages = micron::math::nearest_pow2ll(pages);
   return __saturate_pages_to_bytes(pages);
 }
@@ -121,14 +123,18 @@ __calculate_space_bulk(usize sz)
 {
   // logarithmic taper
   long double factor = 1.0 + 0.1 * micron::math::logf128(static_cast<double>(sz) / (1024 * 1024 * 1024));
-  if ( factor < 1.0 )
-    factor = 1.0;     // never shrink
+  if ( factor < 1.0 ) factor = 1.0;      // never shrink
 
   usize t = static_cast<usize>(sz * factor);
 
   usize pow2_sz = 1;
-  while ( pow2_sz < t )
+  while ( pow2_sz < t ) {
+    if ( pow2_sz > (micron::numeric_limits<usize>::max() >> 1) ) break;      // next shift would wrap to 0 (32-bit)
     pow2_sz <<= 1;
+  }
+#if defined(__micron_arch_width_32)
+  if ( pow2_sz > static_cast<usize>(__width32_sheet_cap) ) pow2_sz = static_cast<usize>(__width32_sheet_cap);
+#endif
   return pow2_sz;
 }
 
@@ -140,8 +146,9 @@ __calculate_space_saturated(usize sz)
   u64 t = static_cast<u64>(f_sz * micron::math::logf128(f_sz) * (micron::math::logf128(micron::math::logf128(f_sz))));
   float t_2 = (float)t / __system_pagesize;
   t_2 = micron::math::ceil(t_2);
-  sz = micron::math::nearest_pow2ll(((usize)t_2) < __default_minimum_page_mul ? __default_minimum_page_mul : (usize)t_2)
-       * __system_pagesize;
+  // route through the saturating pages->bytes conversion: the raw multiply wraps on width-32
+  sz = __saturate_pages_to_bytes(
+      micron::math::nearest_pow2ll(((usize)t_2) < __default_minimum_page_mul ? __default_minimum_page_mul : (usize)t_2));
   return sz;
 }
 
@@ -151,7 +158,7 @@ __get_kernel_memory(u64 sz)
   return micron::sys_allocator<byte>::alloc(sz);
 }
 
-template <typename T>
+template<typename T>
 inline T
 __get_kernel_chunk(u64 sz)
 {
@@ -162,7 +169,7 @@ __get_kernel_chunk(u64 sz)
   return { micron::sys_allocator<byte>::alloc(sz), static_cast<usize>(sz) };
 }
 
-template <typename T>
+template<typename T>
 inline void
 __release_kernel_chunk(const T &mem)
 {
@@ -172,4 +179,4 @@ __release_kernel_chunk(const T &mem)
   }
   micron::sys_allocator<byte>::dealloc(mem.ptr, mem.len);
 }
-};     // namespace abc
+};      // namespace abc

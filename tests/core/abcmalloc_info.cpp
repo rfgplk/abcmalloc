@@ -1,0 +1,20 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
+
+#include "../../src/cmalloc.hpp"
+#include <micron/io/console.hpp>
+#include <micron/std.hpp>
+
+int
+main()
+{
+  mc::console("Total usage: ", abc::musage());
+  mc::console("Usage of __class_precise: ", abc::musage<abc::__class_precise>());
+  mc::console("Usage of __class_small: ", abc::musage<abc::__class_small>());
+  mc::console("Usage of __class_medium: ", abc::musage<abc::__class_medium>());
+  mc::console("Usage of __class_large: ", abc::musage<abc::__class_large>());
+  mc::console("Usage of __class_huge: ", abc::musage<abc::__class_huge>());
+  return 1;
+}

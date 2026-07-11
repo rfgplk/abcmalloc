@@ -1,3 +1,7 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
 //  Copyright (c) 2024- David Lucius Severus
 //
 //  Distributed under the Boost Software License, Version 1.0.
@@ -10,12 +14,12 @@
 // each block carries a fingerprint derived from its address + index +
 // iteration, and the fingerprint is re-verified at every observation point.
 
-#include "../../src/__abc.hpp"
+#include <micron/io/console.hpp>
+
 #include "../../src/cmalloc.hpp"
+#include "../../src/__abc.hpp"
 #include "../../src/config.hpp"
 #include "../../src/malloc.hpp"
-
-#include <micron/io/console.hpp>
 
 #include <micron/array.hpp>
 #include <micron/string/strings.hpp>
@@ -40,8 +44,7 @@ region_is_byte(const void *p, usize n, byte v) noexcept
 {
   const byte *q = static_cast<const byte *>(p);
   for ( usize i = 0; i < n; ++i ) {
-    if ( q[i] != v )
-      return false;
+    if ( q[i] != v ) return false;
   }
   return true;
 }
@@ -65,16 +68,14 @@ fp_byte(usize idx, usize iter, usize off) noexcept
 inline void
 fp_fill(byte *p, usize n, usize idx, usize iter) noexcept
 {
-  for ( usize i = 0; i < n; ++i )
-    p[i] = fp_byte(idx, iter, i);
+  for ( usize i = 0; i < n; ++i ) p[i] = fp_byte(idx, iter, i);
 }
 
 inline bool
 fp_check(const byte *p, usize n, usize idx, usize iter) noexcept
 {
   for ( usize i = 0; i < n; ++i ) {
-    if ( p[i] != fp_byte(idx, iter, i) )
-      return false;
+    if ( p[i] != fp_byte(idx, iter, i) ) return false;
   }
   return true;
 }
@@ -83,7 +84,7 @@ fp_check(const byte *p, usize n, usize idx, usize iter) noexcept
 struct xorshift32 {
   u32 s;
 
-  constexpr xorshift32(u32 seed) noexcept : s(seed ? seed : 0xDEADBEEFu) {}
+  constexpr xorshift32(u32 seed) noexcept : s(seed ? seed : 0xDEADBEEFu) { }
 
   u32
   next() noexcept
@@ -104,11 +105,11 @@ struct xorshift32 {
 };
 
 // canonical tier-class sizes (and a sentinel "above huge")
-constexpr usize __sz_precise = abc::__class_precise;     // 256
-constexpr usize __sz_small = abc::__class_small;         // 512
-constexpr usize __sz_medium = abc::__class_medium;       // 4096
-constexpr usize __sz_large = abc::__class_large;         // 32768
-constexpr usize __sz_huge = abc::__class_huge;           // 262144
+constexpr usize __sz_precise = abc::__class_precise;      // 256
+constexpr usize __sz_small = abc::__class_small;          // 512
+constexpr usize __sz_medium = abc::__class_medium;        // 4096
+constexpr usize __sz_large = abc::__class_large;          // 32768
+constexpr usize __sz_huge = abc::__class_huge;            // 262144
 
 // soft check used for documented-failure tests. tests marked "(FAILS)" preserve
 // patterns we *want* the allocator to handle but which currently expose real
@@ -137,7 +138,7 @@ soft_check(bool ok, const char *what)
   }
 }
 
-}     // anonymous namespace
+}      // anonymous namespace
 
 int
 main(int, char **)
@@ -238,29 +239,29 @@ main(int, char **)
         u32 r = rng.next();
         usize sz;
         switch ( r & 0xFu ) {
-        case 0u :
-        case 1u :
+        case 0u:
+        case 1u:
           sz = 1u + (rng.next() % 255u);
-          break;     // precise
-        case 2u :
-        case 3u :
-        case 4u :
-        case 5u :
+          break;      // precise
+        case 2u:
+        case 3u:
+        case 4u:
+        case 5u:
           sz = 256u + (rng.next() % 256u);
-          break;     // small
-        case 6u :
-        case 7u :
-        case 8u :
-        case 9u :
+          break;      // small
+        case 6u:
+        case 7u:
+        case 8u:
+        case 9u:
           sz = 513u + (rng.next() % 3583u);
-          break;     // medium
-        case 10u :
-        case 11u :
+          break;      // medium
+        case 10u:
+        case 11u:
           sz = 4097u + (rng.next() % 28671u);
-          break;     // large
-        default :
+          break;      // large
+        default:
           sz = 32769u + (rng.next() % 65535u);
-          break;     // big
+          break;      // big
         }
         byte *p = abc::alloc(sz);
         require(p != nullptr, true);
@@ -306,10 +307,8 @@ main(int, char **)
       fp_fill(p, 200, i, 0x0Au);
       ps.emplace_back(p);
     }
-    for ( usize i = 0; i < N; ++i )
-      require(fp_check(ps[i], 200, i, 0x0Au), true);
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) require(fp_check(ps[i], 200, i, 0x0Au), true);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -325,10 +324,8 @@ main(int, char **)
       fp_fill(p, 480, i, 0x0Bu);
       ps.emplace_back(p);
     }
-    for ( usize i = 0; i < N; ++i )
-      require(fp_check(ps[i], 480, i, 0x0Bu), true);
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) require(fp_check(ps[i], 480, i, 0x0Bu), true);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -350,8 +347,7 @@ main(int, char **)
       require(fp_check(ps[i], 64, i, 0x0Cu), true);
       require(fp_check(ps[i] + 3200 - 64, 64, i, 0x0Du), true);
     }
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -376,8 +372,7 @@ main(int, char **)
       require(static_cast<unsigned>(ps[i][__sz_huge / 2u]), static_cast<unsigned>((0x40u + i) & 0xFFu));
       require(static_cast<unsigned>(ps[i][__sz_huge - 1u]), static_cast<unsigned>((0x80u + i) & 0xFFu));
     }
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -391,8 +386,8 @@ main(int, char **)
   test_case("fragmentation: checkerboard with size-class mismatch (odd survivors intact)");
   {
     constexpr usize N = 256;
-    constexpr usize SZA = 400;      // small tier
-    constexpr usize SZB = 1100;     // medium tier
+    constexpr usize SZA = 400;       // small tier
+    constexpr usize SZB = 1100;      // medium tier
     micron::vector<byte *> ps;
     ps.reserve(N);
 
@@ -425,10 +420,8 @@ main(int, char **)
       require(fp_check(gaps[g], SZB, g * 2u, 0xCB02u), true);
     }
 
-    for ( usize i = 1; i < N; i += 2u )
-      abc::dealloc(ps[i]);
-    for ( usize g = 0; g < gaps.size(); ++g )
-      abc::dealloc(gaps[g]);
+    for ( usize i = 1; i < N; i += 2u ) abc::dealloc(ps[i]);
+    for ( usize g = 0; g < gaps.size(); ++g ) abc::dealloc(gaps[g]);
     ps.clear();
     gaps.clear();
   }
@@ -445,7 +438,7 @@ main(int, char **)
     constexpr usize N = 256;
     constexpr usize SZ = 2048;
     byte *ps[N];
-    constexpr usize TAG = 0x4D00u;     // arbitrary stable per-test marker
+    constexpr usize TAG = 0x4D00u;      // arbitrary stable per-test marker
     for ( usize i = 0; i < N; ++i ) {
       ps[i] = abc::alloc(SZ);
       require(ps[i] != nullptr, true);
@@ -472,8 +465,7 @@ main(int, char **)
     }
     // any leftover unfreed (defensive — should be none)
     for ( usize i = 0; i < N; ++i )
-      if ( !freed[i] )
-        abc::dealloc(ps[i]);
+      if ( !freed[i] ) abc::dealloc(ps[i]);
   }
   end_test_case();
 
@@ -662,7 +654,7 @@ main(int, char **)
     constexpr usize ROUNDS = 256;
     constexpr usize TAG = 0x1E00u;
     for ( usize r = 0; r < ROUNDS; ++r ) {
-      usize sz = 64u + ((r * 257u) & 0x3FFFu);     // 64..16447
+      usize sz = 64u + ((r * 257u) & 0x3FFFu);      // 64..16447
       byte *p = abc::launder(sz);
       require(p != nullptr, true);
       fp_fill(p, sz, r, TAG);
@@ -784,15 +776,13 @@ main(int, char **)
     byte *p = abc::alloc(SZ);
     require(p != nullptr, true);
     // first pass: zero the block
-    for ( usize i = 0; i < SZ; ++i )
-      p[i] = 0;
+    for ( usize i = 0; i < SZ; ++i ) p[i] = 0;
     // second: write at strides 17, 257, 4099
     const usize strides[] = { 17u, 257u, 4099u };
     for ( usize si = 0; si < 3; ++si ) {
       usize s = strides[si];
       byte mark = static_cast<byte>(0x40u + si);
-      for ( usize i = 0; i < SZ; i += s )
-        p[i] = mark;
+      for ( usize i = 0; i < SZ; i += s ) p[i] = mark;
     }
     // verify each stride
     bool ok = true;
@@ -800,21 +790,19 @@ main(int, char **)
       usize s = strides[si];
       byte mark = static_cast<byte>(0x40u + si);
       for ( usize i = 0; i < SZ; i += s ) {
-        if ( p[i] != mark ) {     // later strides overwrite earlier ones at
-                                  // multiples; we just verify last writer wins
+        if ( p[i] != mark ) {      // later strides overwrite earlier ones at
+                                   // multiples; we just verify last writer wins
           // accept overwrite if it matches a *later* stride's mark
           bool overwritten = false;
           for ( usize sj = si + 1; sj < 3; ++sj )
-            if ( (i % strides[sj]) == 0 and p[i] == static_cast<byte>(0x40u + sj) )
-              overwritten = true;
+            if ( (i % strides[sj]) == 0 and p[i] == static_cast<byte>(0x40u + sj) ) overwritten = true;
           if ( !overwritten ) {
             ok = false;
             break;
           }
         }
       }
-      if ( !ok )
-        break;
+      if ( !ok ) break;
     }
     require(ok, true);
     abc::dealloc(p);
@@ -855,8 +843,7 @@ main(int, char **)
       require(c.ptr != nullptr, true);
       require(c.len >= req, true);
       // touch entire payload
-      for ( usize i = 0; i < c.len; ++i )
-        c.ptr[i] = static_cast<byte>((i + r) & 0xFFu);
+      for ( usize i = 0; i < c.len; ++i ) c.ptr[i] = static_cast<byte>((i + r) & 0xFFu);
       bool ok = true;
       for ( usize i = 0; i < c.len; ++i )
         if ( c.ptr[i] != static_cast<byte>((i + r) & 0xFFu) ) {
@@ -899,8 +886,7 @@ main(int, char **)
       require(p != nullptr, true);
       usize h = sz < 64u ? sz : 64u;
       fp_fill(p, h, i, TAG_H);
-      if ( sz > 128u )
-        fp_fill(p + sz - 64u, 64, i, TAG_T);
+      if ( sz > 128u ) fp_fill(p + sz - 64u, 64, i, TAG_T);
       bag.emplace_back(rec{ p, sz });
     }
     // verify everyone at peak residency
@@ -908,8 +894,7 @@ main(int, char **)
       usize sz = bag[i].sz;
       usize h = sz < 64u ? sz : 64u;
       require(fp_check(bag[i].p, h, i, TAG_H), true);
-      if ( sz > 128u )
-        require(fp_check(bag[i].p + sz - 64u, 64, i, TAG_T), true);
+      if ( sz > 128u ) require(fp_check(bag[i].p + sz - 64u, 64, i, TAG_T), true);
     }
     // free LIFO
     for ( usize ii = N; ii > 0; --ii ) {
@@ -934,11 +919,9 @@ main(int, char **)
       require(p != nullptr, true);
       // write head, tail, and one byte off the tail (still inside)
       p[0] = static_cast<byte>(0xE0u | (i & 0xFu));
-      if ( sizes[i] >= 2u )
-        p[sizes[i] - 1u] = static_cast<byte>(0xF0u | (i & 0xFu));
+      if ( sizes[i] >= 2u ) p[sizes[i] - 1u] = static_cast<byte>(0xF0u | (i & 0xFu));
       require(static_cast<unsigned>(p[0]), static_cast<unsigned>(0xE0u | (i & 0xFu)));
-      if ( sizes[i] >= 2u )
-        require(static_cast<unsigned>(p[sizes[i] - 1u]), static_cast<unsigned>(0xF0u | (i & 0xFu)));
+      if ( sizes[i] >= 2u ) require(static_cast<unsigned>(p[sizes[i] - 1u]), static_cast<unsigned>(0xF0u | (i & 0xFu)));
       abc::dealloc(p);
     }
   }
@@ -1013,10 +996,8 @@ main(int, char **)
       ps.emplace_back(p);
     }
     // still zero with all live
-    for ( usize i = 0; i < N; ++i )
-      require(region_is_byte(ps[i], SZ, 0), true);
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) require(region_is_byte(ps[i], SZ, 0), true);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -1041,7 +1022,7 @@ main(int, char **)
     // clear first half by moving them out
     for ( usize i = 0; i < N / 2u; ++i ) {
       micron::string sink = micron::move(bag[i]);
-      (void)sink;     // dropped at scope end
+      (void)sink;      // dropped at scope end
     }
     // refill first half
     for ( usize i = 0; i < N / 2u; ++i ) {
@@ -1073,7 +1054,7 @@ main(int, char **)
     require(b != nullptr, true);
     require(c != nullptr, true);
     fp_fill(a, __sz_precise, 0u, 0x0BCEu);
-    fp_fill(b, 256u, 1u, 0x0BCEu);     // partial fp for cost
+    fp_fill(b, 256u, 1u, 0x0BCEu);      // partial fp for cost
     fp_fill(c, 256u, 2u, 0x0BCEu);
 
     for ( usize r = 0; r < ROUNDS; ++r ) {
@@ -1083,19 +1064,19 @@ main(int, char **)
       require(fp_check(c, 256u, 2u, 0x0BCEu), true);
       // free one, reallocate it, fingerprint it again
       switch ( r % 3u ) {
-      case 0u :
+      case 0u:
         abc::dealloc(a);
         a = abc::alloc(__sz_precise);
         require(a != nullptr, true);
         fp_fill(a, __sz_precise, 0u, 0x0BCEu);
         break;
-      case 1u :
+      case 1u:
         abc::dealloc(b);
         b = abc::alloc(__sz_medium);
         require(b != nullptr, true);
         fp_fill(b, 256u, 1u, 0x0BCEu);
         break;
-      default :
+      default:
         abc::dealloc(c);
         c = abc::alloc(__sz_large);
         require(c != nullptr, true);
@@ -1123,8 +1104,7 @@ main(int, char **)
       byte *p = abc::alloc(16u);
       require(p != nullptr, true);
       // pack 16 bytes of identifying data
-      for ( usize k = 0; k < 16u; ++k )
-        p[k] = static_cast<byte>((i + k * 7u) & 0xFFu);
+      for ( usize k = 0; k < 16u; ++k ) p[k] = static_cast<byte>((i + k * 7u) & 0xFFu);
       ps.emplace_back(p);
     }
     bool ok = true;
@@ -1135,12 +1115,10 @@ main(int, char **)
           break;
         }
       }
-      if ( !ok )
-        break;
+      if ( !ok ) break;
     }
     require(ok, true);
-    for ( usize i = 0; i < N; ++i )
-      abc::dealloc(ps[i]);
+    for ( usize i = 0; i < N; ++i ) abc::dealloc(ps[i]);
     ps.clear();
   }
   end_test_case();
@@ -1284,8 +1262,7 @@ main(int, char **)
         byte *q = static_cast<byte *>(abc::realloc(e.p, new_sz));
         require(q != nullptr, true);
         usize head = e.len < new_sz ? e.len : new_sz;
-        if ( head > HEAD )
-          head = HEAD;
+        if ( head > HEAD ) head = HEAD;
         require(fp_check(q, head, e.idx, e.iter), true);
         // re-fingerprint the full new size with a new (idx, iter)
         fp_fill(q, new_sz, seq, it);
@@ -1344,8 +1321,7 @@ main(int, char **)
         fp_fill(p, keep, step, 0xC011u);
         byte *q = static_cast<byte *>(abc::realloc(p, cur));
         soft_check(q != nullptr, "realloc returns non-null");
-        if ( !q )
-          break;
+        if ( !q ) break;
         soft_check(fp_check(q, keep, step, 0xC011u), "full keep-byte prefix survives cross-tier realloc");
         p = q;
       }
@@ -1365,8 +1341,7 @@ main(int, char **)
     for ( usize sz : sizes ) {
       byte *p = abc::alloc(sz);
       soft_check(p != nullptr, "alloc non-null");
-      if ( !p )
-        continue;
+      if ( !p ) continue;
       usize q = abc::query_size(p);
       soft_check(q >= sz, "query_size >= requested");
       abc::dealloc(p);
@@ -1430,8 +1405,7 @@ main(int, char **)
       usize j = rng.range(static_cast<u32>(i));
       usize sz = bag[j].sz;
       usize h = sz < 64u ? sz : 64u;
-      if ( !fp_check(bag[j].p, h, j, TAG_H) )
-        any_fail = true;
+      if ( !fp_check(bag[j].p, h, j, TAG_H) ) any_fail = true;
       abc::dealloc(bag[j].p);
       bag[j] = bag[i - 1];
       bag.pop_back();

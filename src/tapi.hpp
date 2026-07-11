@@ -33,7 +33,7 @@
 namespace abc
 {
 
-constexpr static const u32 __max_arenas = 64;     //  ~3 MiB BSS upper bound
+constexpr static const u32 __max_arenas = 64;      //  ~3 MiB BSS upper bound
 
 alignas(__arena) inline byte __arena_pool_storage[__max_arenas * sizeof(__arena)]{};
 
@@ -70,8 +70,7 @@ __this_tid(void) noexcept
 [[gnu::cold]] static inline bool
 __owner_alive(i32 tid) noexcept
 {
-  if ( tid == 0 )
-    return false;
+  if ( tid == 0 ) return false;
   const i32 pid = static_cast<i32>(micron::syscall(SYS_getpid));
   return micron::syscall(SYS_tgkill, pid, tid, 0) == 0;
 }
@@ -81,14 +80,13 @@ static void
 __release_tls_arena(void) noexcept
 {
   __arena *a = __tls_arena;
-  if ( !a )
-    return;
+  if ( !a ) return;
   const i32 tid = __this_tid();
   for ( u32 i = 0; i < __max_arenas; ++i ) {
     if ( __arena_pool[i] == a ) {
       if ( __arena_owner[i].get(micron::memory_order_acquire) == tid ) {
-        a->__maybe_drain();     // flush pending cross-thread frees while we still own it
-        __arena_owner[i].store(__arena_slot_free, micron::memory_order_release);     // recyclable (ABC-10)
+        a->__maybe_drain();      // flush pending cross-thread frees while we still own it
+        __arena_owner[i].store(__arena_slot_free, micron::memory_order_release);      // recyclable (ABC-10)
       }
       __tls_arena = nullptr;
       return;
@@ -119,8 +117,8 @@ inline thread_local __arena_slot_releaser __arena_releaser_tls{};
 [[gnu::cold, gnu::noinline]] inline __arena *
 __claim_arena_slow(void) noexcept
 {
-  micron::__thread_exit_hook = &__release_tls_arena;     // micron::thread exit path
-  (void)&__arena_releaser_tls;                           // force-instantiate the TLS-dtor releaser
+  micron::__thread_exit_hook = &__release_tls_arena;      // micron::thread exit path
+  (void)&__arena_releaser_tls;                            // force-instantiate the TLS-dtor releaser
 
   const i32 tid = __this_tid();
 
@@ -131,6 +129,25 @@ __claim_arena_slow(void) noexcept
       i32 expect = __arena_slot_free;
       if ( __arena_owner[i].compare_exchange_strong(expect, tid, micron::memory_order_acq_rel, micron::memory_order_acquire) ) {
         __arena *a = __arena_pool[i];
+        a->__maybe_drain();
+        __tls_arena = a;
+        return a;
+      }
+    }
+  }
+
+  // WARNING: reclaim a slot whose owner thread has died without releasing it;
+  // a joined threads slot can lag the next threads reclaim, under fast churn stale slots can accumulate rapidly
+  {
+    const u32 n = __arena_pool_next.get(micron::memory_order_acquire);
+    const u32 lim = n > __max_arenas ? __max_arenas : n;
+    for ( u32 i = 0; i < lim; ++i ) {
+      __arena *a = __arena_pool[i];
+      if ( !a ) continue;
+      i32 owner = __arena_owner[i].get(micron::memory_order_acquire);
+      if ( owner <= 0 || owner == tid ) continue;
+      if ( __owner_alive(owner) ) continue;
+      if ( __arena_owner[i].compare_exchange_strong(owner, tid, micron::memory_order_acq_rel, micron::memory_order_acquire) ) {
         a->__maybe_drain();
         __tls_arena = a;
         return a;
@@ -150,7 +167,10 @@ __claim_arena_slow(void) noexcept
   }
 
   for ( __arena_node *nd = __overflow_head.get(micron::memory_order_acquire); nd != nullptr; nd = nd->next ) {
-    i32 expect = __arena_slot_free;
+    i32 owner = nd->owner.get(micron::memory_order_acquire);
+    const bool reclaimable = (owner == __arena_slot_free) || (owner > 0 && owner != tid && !__owner_alive(owner));
+    if ( !reclaimable ) continue;
+    i32 expect = owner;      // free or a dead owner; claim it
     if ( nd->owner.compare_exchange_strong(expect, tid, micron::memory_order_acq_rel, micron::memory_order_acquire) ) {
       nd->arena.__maybe_drain();
       __tls_arena = &nd->arena;
@@ -192,10 +212,9 @@ __route_dealloc(byte *p, usize sz) noexcept
   if ( !owner || owner == me ) [[likely]] {
     return sz ? me->pop(micron::__chunk<byte>{ p, sz }) : me->pop(p);
   }
-  while ( !owner->__remote_push(p, sz) ) [[unlikely]] {
-    for ( int i = 0; i < 64; ++i )
-      __cpu_pause();
-  }
+  // wait-free: the owner's ring, falling back to the embedded-node overflow LIFO when the ring is full; never spin here
+  ABC_DOCTOR(doctor::record_remote_free(p, sz);)
+  (void)owner->__remote_push(p, sz);
   return true;
 }
 
@@ -211,23 +230,20 @@ __query_arena(const void *p) noexcept
   }
 }
 
-template <typename Fn>
+template<typename Fn>
 [[gnu::always_inline]] static inline void
 __for_each_live_arena(Fn &&fn) noexcept
 {
   if constexpr ( !__default_multithread_safe ) {
-    if ( auto *a = __tls_arena; a )
-      fn(*a);
+    if ( auto *a = __tls_arena; a ) fn(*a);
     return;
   }
   const u32 n = __arena_pool_next.get(micron::memory_order_acquire);
   const u32 lim = n > __max_arenas ? __max_arenas : n;
   for ( u32 i = 0; i < lim; ++i ) {
-    if ( auto *a = __arena_pool[i]; a )
-      fn(*a);
+    if ( auto *a = __arena_pool[i]; a ) fn(*a);
   }
-  for ( __arena_node *nd = __overflow_head.get(micron::memory_order_acquire); nd != nullptr; nd = nd->next )
-    fn(nd->arena);
+  for ( __arena_node *nd = __overflow_head.get(micron::memory_order_acquire); nd != nullptr; nd = nd->next ) fn(nd->arena);
 }
 
 // NOTE: __boot_abcmalloc was the old entry point, keeping it around in case old start files are still used
@@ -238,4 +254,4 @@ __boot_abcmalloc(void) noexcept
   // don't inline otherwise the linkers doesn't see
 }
 
-};     // namespace abc
+};      // namespace abc

@@ -19,7 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
-
 #include <micron/memory/pointers/sentinel.hpp>
 #include <micron/types.hpp>
 
@@ -59,4 +58,4 @@ get_metadata_addr(addr_t *ptr)
   return reinterpret_cast<addr_t *>(reinterpret_cast<byte *>(ptr) - __hdr_offset);
 }
 
-};     // namespace abc
+};      // namespace abc

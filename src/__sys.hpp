@@ -33,27 +33,21 @@ namespace micron
 inline bool
 __validate_mmap_addr(addr_t *ptr)
 {
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::out_of_memory) )
-    return false;
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::overflow) )
-    return false;
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::invalid_arg) )
-    return false;
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::file_exists) )
-    return false;
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::permissions) )
-    return false;
-  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::try_again) )
-    return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::out_of_memory) ) return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::overflow) ) return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::invalid_arg) ) return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::file_exists) ) return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::permissions) ) return false;
+  if ( reinterpret_cast<uintptr_t>(ptr) == -static_cast<uintptr_t>(error::try_again) ) return false;
   return true;
 }
 
 // base allocator which all others inherit from
-template <typename T, usize Sz = alloc_auto_sz>
+template<typename T, usize Sz = alloc_auto_sz>
   requires(micron::is_integral_v<T>)
 struct sys_allocator {
   static T *
-  alloc(usize n)     // allocate 'smartly'
+  alloc(usize n)      // allocate 'smartly'
   {
     // NOTE: from mm/mmap.c - do_mmap
     // mmap will return either, -ENOMEM, -EOVERFLOW, -EINVAL, -EEXIST, -EPERM, -EAGAIN, -EOVERFLOW; depending on
@@ -63,8 +57,7 @@ struct sys_allocator {
       ptr = micron::map_normal(nullptr, n);
     else if constexpr ( Sz == large_page_size )
       ptr = micron::map_large(nullptr, n);
-    if ( !__validate_mmap_addr(ptr) || ptr == nullptr )
-      exc<except::critical_error>("sys_allocator::alloc(): mmap() refused by kernel");
+    if ( !__validate_mmap_addr(ptr) || ptr == nullptr ) exc<except::critical_error>("sys_allocator::alloc(): mmap() refused by kernel");
 
     if ( micron::madvise(ptr, n, micron::madv_dontneed) != 0 ) {
     }
@@ -74,13 +67,11 @@ struct sys_allocator {
 
   static void
   dealloc(T *mem, usize len)
-  {     // deallocate at location N
-    if ( mem == nullptr )
-      exc<except::critical_error>("sys_allocator::dealloc(): nullptr was provided");
-    // micron::munmap(mem, len);
-    if ( micron::munmap(mem, len) == -1 )
+  {      // deallocate at location N
+    if ( mem == nullptr ) exc<except::critical_error>("sys_allocator::dealloc(): nullptr was provided");
+    if ( micron::munmap(reinterpret_cast<addr_t *>(mem), len) == -1 )
       exc<except::critical_error>("sys_allocator::dealloc(): munmap() failed");
     mem = nullptr;
   }
 };
-};     // namespace micron
+};      // namespace micron

@@ -28,9 +28,7 @@
 //   cells hold only one allocation at a time. Total RSS for the whole run
 //   stays well below the user-specified 4 GiB ceiling.
 
-#include "../src/cmalloc.hpp"
-
-#include <external/bbench/bench.hpp>
+#include "../external/bbench/bench.hpp"
 
 #include <micron/io/console.hpp>
 #include <micron/io/stdout.hpp>
@@ -57,14 +55,10 @@ constexpr u64 TIER_SAFE_BATCH = 32;
 round_trip_reps(u64 sz) noexcept
 {
 
-  if ( sz <= (4ULL << 10) )
-    return 4096;
-  if ( sz <= (64ULL << 10) )
-    return 1024;
-  if ( sz <= (256ULL << 10) )
-    return 256;
-  if ( sz <= (4ULL << 20) )
-    return 64;
+  if ( sz <= (4ULL << 10) ) return 4096;
+  if ( sz <= (64ULL << 10) ) return 1024;
+  if ( sz <= (256ULL << 10) ) return 256;
+  if ( sz <= (4ULL << 20) ) return 64;
   return 16;
 }
 
@@ -72,13 +66,10 @@ round_trip_reps(u64 sz) noexcept
 batch_for(u64 sz) noexcept
 {
   u64 b = BATCH_BUDGET_BYTES / (sz == 0 ? 1 : sz);
-  if ( b > MAX_BATCH )
-    b = MAX_BATCH;
+  if ( b > MAX_BATCH ) b = MAX_BATCH;
 
-  if ( sz >= (16ULL << 10) && b > TIER_SAFE_BATCH )
-    b = TIER_SAFE_BATCH;
-  if ( b < 1 )
-    b = 1;
+  if ( sz >= (16ULL << 10) && b > TIER_SAFE_BATCH ) b = TIER_SAFE_BATCH;
+  if ( b < 1 ) b = 1;
   return b;
 }
 
@@ -92,8 +83,7 @@ struct fmt2 {
 [[gnu::always_inline]] inline fmt2
 to_fmt2(f64 v) noexcept
 {
-  if ( v < 0 )
-    v = 0;
+  if ( v < 0 ) v = 0;
   const u64 s = static_cast<u64>(v * 100.0 + 0.5);
   return { s / 100, static_cast<u32>(s % 100) };
 }
@@ -102,13 +92,12 @@ struct line {
   char buf[256];
   u32 pos;
 
-  constexpr line() noexcept : pos(0) {}
+  constexpr line() noexcept : pos(0) { }
 
   void
   s(const char *p) noexcept
   {
-    while ( *p )
-      buf[pos++] = *p++;
+    while ( *p ) buf[pos++] = *p++;
   }
 
   void
@@ -118,8 +107,7 @@ struct line {
     if ( want < pos )
       buf[pos++] = ' ';
     else
-      while ( pos < want )
-        buf[pos++] = ' ';
+      while ( pos < want ) buf[pos++] = ' ';
   }
 
   void
@@ -137,8 +125,7 @@ struct line {
       }
     }
     pad_to(end_col, n);
-    while ( n )
-      buf[pos++] = tmp[--n];
+    while ( n ) buf[pos++] = tmp[--n];
   }
 
   void
@@ -155,8 +142,7 @@ struct line {
         w /= 10;
       }
     pad_to(end_col, n + 3);
-    while ( n )
-      buf[pos++] = tmp[--n];
+    while ( n ) buf[pos++] = tmp[--n];
     buf[pos++] = '.';
     buf[pos++] = '0' + static_cast<char>(f.frac_x100 / 10);
     buf[pos++] = '0' + static_cast<char>(f.frac_x100 % 10);
@@ -166,20 +152,16 @@ struct line {
   s_at(const char *p, u32 end_col) noexcept
   {
     u32 n = 0;
-    while ( p[n] )
-      ++n;
+    while ( p[n] ) ++n;
     pad_to(end_col, n);
-    while ( *p )
-      buf[pos++] = *p++;
+    while ( *p ) buf[pos++] = *p++;
   }
 
   void
   s_lj_at(const char *p, u32 end_col) noexcept
   {
-    while ( *p )
-      buf[pos++] = *p++;
-    while ( pos < end_col )
-      buf[pos++] = ' ';
+    while ( *p ) buf[pos++] = *p++;
+    while ( pos < end_col ) buf[pos++] = ' ';
   }
 
   const char *
@@ -274,14 +256,13 @@ median_f64(f64 *xs, u32 n) noexcept
   return xs[n / 2];
 }
 
-template <typename Setup, typename Kernel, typename Cleanup>
+template<typename Setup, typename Kernel, typename Cleanup>
 [[gnu::noinline]] cell
 measure(const char *name, u64 size, u64 ops_per_rep, u64 reps_per_meas, Setup &&setup, Kernel &&kernel, Cleanup &&cleanup) noexcept
 {
   for ( u64 i = 0; i < WARMUP_REPS; ++i ) {
     setup();
-    for ( u64 j = 0; j < reps_per_meas; ++j )
-      kernel();
+    for ( u64 j = 0; j < reps_per_meas; ++j ) kernel();
     cleanup();
   }
 
@@ -295,8 +276,7 @@ measure(const char *name, u64 size, u64 ops_per_rep, u64 reps_per_meas, Setup &&
     mem_events evs{ bbench::quiet{} };
     evs.open();
     evs.begin();
-    for ( u64 i = 0; i < reps_per_meas; ++i )
-      kernel();
+    for ( u64 i = 0; i < reps_per_meas; ++i ) kernel();
     evs.end();
 
     const auto cyc = static_cast<u64>(evs.get<bbench::hardware_cycles>().retrieve());
@@ -423,25 +403,21 @@ sweep_pool()
     {
       auto setup = nop_setup;
       auto kernel = [sz, batch]() {
-        for ( u64 i = 0; i < batch; ++i )
-          g_ptrs[i] = abc::alloc(sz);
+        for ( u64 i = 0; i < batch; ++i ) g_ptrs[i] = abc::alloc(sz);
         clobber_arr();
       };
       auto cleanup = [batch]() {
-        for ( u64 i = 0; i < batch; ++i )
-          abc::dealloc(g_ptrs[i]);
+        for ( u64 i = 0; i < batch; ++i ) abc::dealloc(g_ptrs[i]);
       };
       print_cell(measure("pool-alloc (alloc x N)", sz, batch, 1, setup, kernel, cleanup));
     }
 
     {
       auto setup = [sz, batch]() {
-        for ( u64 i = 0; i < batch; ++i )
-          g_ptrs[i] = abc::alloc(sz);
+        for ( u64 i = 0; i < batch; ++i ) g_ptrs[i] = abc::alloc(sz);
       };
       auto kernel = [batch]() {
-        for ( u64 i = 0; i < batch; ++i )
-          abc::dealloc(g_ptrs[i]);
+        for ( u64 i = 0; i < batch; ++i ) abc::dealloc(g_ptrs[i]);
         clobber_arr();
       };
       auto cleanup = nop_cleanup;
@@ -451,11 +427,9 @@ sweep_pool()
     {
       auto setup = nop_setup;
       auto kernel = [sz, batch]() {
-        for ( u64 i = 0; i < batch; ++i )
-          g_ptrs[i] = abc::alloc(sz);
+        for ( u64 i = 0; i < batch; ++i ) g_ptrs[i] = abc::alloc(sz);
         clobber_arr();
-        for ( u64 i = 0; i < batch; ++i )
-          abc::dealloc(g_ptrs[i]);
+        for ( u64 i = 0; i < batch; ++i ) abc::dealloc(g_ptrs[i]);
       };
       auto cleanup = nop_cleanup;
       print_cell(measure("pool-roundtrip (a+f) x N", sz, 2 * batch, 1, setup, kernel, cleanup));
@@ -470,8 +444,7 @@ sweep_realloc()
 
   constexpr u64 SMALL = 128;
   for ( u64 big : SIZES ) {
-    if ( big <= SMALL )
-      continue;
+    if ( big <= SMALL ) continue;
     const u64 reps = round_trip_reps(big);
 
     auto kernel = [big]() {
@@ -535,7 +508,7 @@ sweep_queries()
   }
 }
 
-};     // namespace
+};      // namespace
 
 int
 main(void)

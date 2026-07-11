@@ -29,6 +29,10 @@ namespace abc
 constexpr static const bool __is_constrained = false;
 constexpr static const usize __system_pagesize = micron::page_size;
 
+// once an allocation occurs its address is NEVER freed back to the OS nor regranted to a different allocation (even on explicit free()) and
+// the sheet it lives on is NEVER unmapped
+constexpr static const bool __default_persistent_mode = false;
+
 // shifts defined like this so we can easily pull them up in code
 constexpr static const usize __class_arena_internal = 1024;
 constexpr static const usize __class_precise_shift = 8;
@@ -60,7 +64,7 @@ constexpr static const usize __default_cache_size_factor = (1 << 16);
 constexpr static const usize __default_arena_page_buf = 2048;
 
 constexpr static const usize __default_magic_size = micron::numeric_limits<usize>::max();
-constexpr static const usize __default_minimum_page_mul = 16;     // 65kB minimum per sheet, larger buckets will exceed this
+constexpr static const usize __default_minimum_page_mul = 16;      // 65kB minimum per sheet, larger buckets will exceed this
 
 // 1% of system RAM. on 256 GB this is ~2.6 GB distributed across all five size classes by weight
 constexpr static const f32 __default_prealloc_factor = 0.01f;
@@ -69,22 +73,22 @@ constexpr static const f32 __default_prealloc_factor = 0.01f;
 constexpr static const usize __default_cache_step = 8192;
 
 constexpr static const bool __default_launder
-    = false;     // by default is off, laundering lets the allocators allocate same sized requests at the same address
+    = false;      // by default is off, laundering lets the allocators allocate same sized requests at the same address
 
 constexpr static const bool __default_lazy_construct = true;
-constexpr static const bool __default_single_instance = true;      // enable an allocator per thread (DEPRECATED for now)
-constexpr static const bool __default_global_instance = false;     // enable a single global allocator (DEPRECATED for now)
+constexpr static const bool __default_single_instance = true;       // enable an allocator per thread (DEPRECATED for now)
+constexpr static const bool __default_global_instance = false;      // enable a single global allocator (DEPRECATED for now)
 // freestanding builds have no threading runtime
 #if defined(__micron_freestanding)
 constexpr static const bool __default_multithread_safe = false;
 #else
-constexpr static const bool __default_multithread_safe = true;     // essentially, enables locks across API calls
+constexpr static const bool __default_multithread_safe = true;      // essentially, enables locks across API calls
 #endif
 
 // preallocate precise/small/medium at startup with weight-based shares.
 constexpr static const bool __default_eager_hot_tiers = true;
 
-constexpr static const bool __default_per_class_free_cache = true;
+constexpr static const bool __default_per_class_free_cache = __default_persistent_mode ? false : true;
 
 // 128 deallocations between sweeps. server workloads sustain high throughput over long periods; sweeping too often serialises dealloc paths
 // under contention
@@ -116,8 +120,8 @@ constexpr static const usize __default_max_retries = 3;
 // is a define so we can intercept at the compilation stage
 #define __MICRON_ABCMALLOC_CRITICAL_EXIT 11
 // in pages (each page is 4096)
-constexpr static const bool __default_saturated_mode = true;     // enables a saturation buffer, which checks the rate at which new
-                                                                 // requests are coming in. adjusts allocation space accordingly
+constexpr static const bool __default_saturated_mode = true;      // enables a saturation buffer, which checks the rate at which new
+                                                                  // requests are coming in. adjusts allocation space accordingly
 
 constexpr static const usize __default_overcommit = 2;
 
@@ -152,6 +156,13 @@ constexpr static const int __default_guard_page_perms = micron::prot_none;
 
 constexpr static const bool __default_self_cleanup = false;
 
+static_assert(!(__default_persistent_mode && __default_launder),
+              "abcmalloc: persistent mode is incompatible with __default_launder (it reuses addresses).");
+static_assert(!(__default_persistent_mode && __default_self_cleanup),
+              "abcmalloc: persistent mode requires __default_self_cleanup off (arena dtor must not unmap).");
+static_assert(!(__default_persistent_mode && __default_per_class_free_cache),
+              "abcmalloc: persistent mode requires __default_per_class_free_cache off (it regrants freed blocks).");
+
 constexpr static const bool __default_debug_notices = false;
 constexpr static const bool __default_zero_on_alloc = false;
 constexpr static const bool __default_zero_on_free = false;
@@ -174,7 +185,7 @@ constexpr static const bool __default_guard_arena_metadata = true;
 constexpr static const bool __default_unsafe_size_recovery = false;
 // when true, sz==0 scrub paths read size from addr - __hdr_offset (only for TLSF) when false sz==0 scrubs are skipped
 
-constexpr static const bool __default_check_alignment = false;     // verify that addresses passed to pop/freeze are naturally aligned
+constexpr static const bool __default_check_alignment = false;      // verify that addresses passed to pop/freeze are naturally aligned
 
 constexpr static const bool __default_poison_on_free = false;
 // fill freed regions with __default_poison_byte to detect use-after-free.
@@ -186,4 +197,36 @@ constexpr static const bool __default_redzone = false;
 
 constexpr static const byte __default_redzone_byte = 0xC1;
 constexpr static const usize __default_redzone_size = 8;
-};     // namespace abc
+
+// %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+// doctor mode configuration
+// (enabled via -DABCMALLOC_DOCTOR_HELP)
+#if defined(ABCMALLOC_DOCTOR_HELP)
+constexpr static const bool __default_doctor_help = true;
+#if defined(ABCMALLOC_DOCTOR_RESCUE)
+constexpr static const bool __default_doctor_rescue = true;      // attempt repair vs report-only
+#else
+constexpr static const bool __default_doctor_rescue = false;
+#endif
+#if defined(ABCMALLOC_DOCTOR_RESCUE_CONSERVATIVE)
+constexpr static const bool __default_doctor_rescue_conservative
+    = true;      // escape hatch: reroute/skip/quarantine only, no in-place repair
+#else
+constexpr static const bool __default_doctor_rescue_conservative = false;
+#endif
+constexpr static const bool __default_doctor_harden = true;      // auto-enable redzone/guard/provenance/poison for deep detection
+constexpr static const bool __default_doctor_leak_report_at_exit = true;      // dump the live-set at thread/process exit
+constexpr static const int __default_doctor_color = 2;      // forensic-output ANSI coloring: 0=never 1=always 2=auto (tty-detect on fd 2)
+constexpr static const bool __default_doctor_crash_safe
+    = true;      // install a fault-time SIGSEGV/SIGBUS handler so the sweep/forensics survive faulting on corrupt/unmapped memory
+constexpr static const bool __default_doctor_canary = true;           // snapshot the block header + lay a slack canary at alloc
+constexpr static const byte __default_doctor_canary_byte = 0x5A;      // slack-canary fill byte
+constexpr static const bool __default_doctor_backtrace = true;        // capture an alloc-site backtrace by frame-pointer walking
+constexpr static const usize __default_doctor_max_records
+    = (1ull << 24);      // soft cap: past this the ledger drops all non-live records (logged)
+static_assert(!__default_doctor_rescue || __default_doctor_help, "abcmalloc: doctor rescue requires __default_doctor_help");
+static_assert(!__default_doctor_harden || __default_doctor_help, "abcmalloc: doctor harden requires __default_doctor_help");
+static_assert(!__default_doctor_rescue_conservative || __default_doctor_rescue,
+              "abcmalloc: doctor rescue_conservative requires __default_doctor_rescue");
+#endif
+};      // namespace abc

@@ -1,14 +1,18 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
 // Focused diagnostic: does abc::alloc / abc::realloc ever return a block whose
 // [p, p+n) range overlaps an already-live allocation? Single-threaded, so the
 // only writer of user memory is this probe. We check each freshly returned
 // block against every live block at the instant it is handed out.
 
 #include "../../src/cmalloc.hpp"
-#include "../../src/io/console.hpp"
-#include "../../src/math/rng/engines.hpp"
-#include "../../src/memory/allocation/abcmalloc/__abc.hpp"
-#include "../../src/memory/allocation/abcmalloc/config.hpp"
-#include "../../src/memory/allocation/abcmalloc/malloc.hpp"
+#include <micron/io/console.hpp>
+#include <micron/math/rng/engines.hpp>
+#include "../../src/__abc.hpp"
+#include "../../src/config.hpp"
+#include "../../src/malloc.hpp"
 #include "../snowball/snowball.hpp"
 
 using namespace snowball;

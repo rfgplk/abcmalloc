@@ -1,0 +1,23 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
+#include "../../src/cmalloc.hpp"
+#include <micron/io/console.hpp>
+#include <micron/std.hpp>
+
+void *volatile escaped;
+#include <random>
+
+int
+main()
+{
+  if constexpr ( true ) {
+    for ( size_t n = 0; n < 1000; ++n ) {
+      void *dont_optimize = abc::malloc(1024);
+      escaped = dont_optimize;
+      abc::free(dont_optimize);
+    }
+  }
+  return 1;
+}

@@ -34,18 +34,24 @@
 // distinct allocating worker-thread lifetimes <= 63 to keep every worker on its
 // own arena (matters for the cross-arena donation test).
 
-#include "../../src/__abc.hpp"
+#include <micron/io/console.hpp>
+
 #include "../../src/cmalloc.hpp"
+#include "../../src/__abc.hpp"
 #include "../../src/config.hpp"
 #include "../../src/malloc.hpp"
 
 #include <micron/atomic/atomic.hpp>
 #include <micron/bits/__pause.hpp>
-#include <micron/io/console.hpp>
 #include <micron/math/rng/engines.hpp>
 #include <micron/mutex/mutex.hpp>
 #include <micron/new.hpp>
+#ifndef ABC_RIGOR_ST_ONLY
+// MT worker harness (run_workers). Single-threaded consumers -- e.g. the standalone
+// abcmalloc mirror, where pulling micron's thread subsystem would drag in a second
+// allocator copy and ODR-collide -- define ABC_RIGOR_ST_ONLY to skip it.
 #include <micron/thread/threads.hpp>
+#endif
 
 namespace abctest
 {
@@ -90,17 +96,14 @@ inline void
 fp_write_canary(byte *p, usize n, usize idx, usize gen) noexcept
 {
   const usize h = (n < 8) ? n : 8;
-  for ( usize i = 0; i < h; ++i )
-    p[i] = fp_byte(idx, gen, i);
+  for ( usize i = 0; i < h; ++i ) p[i] = fp_byte(idx, gen, i);
   if ( n > 16 ) {
     const usize m = n / 2;
-    for ( usize i = 0; i < 8; ++i )
-      p[m + i] = fp_byte(idx, gen, m + i);
+    for ( usize i = 0; i < 8; ++i ) p[m + i] = fp_byte(idx, gen, m + i);
   }
   if ( n > 8 ) {
     const usize t = n - 8;
-    for ( usize i = 0; i < 8; ++i )
-      p[t + i] = fp_byte(idx, gen, t + i);
+    for ( usize i = 0; i < 8; ++i ) p[t + i] = fp_byte(idx, gen, t + i);
   }
 }
 
@@ -109,19 +112,16 @@ fp_check_canary(const byte *p, usize n, usize idx, usize gen) noexcept
 {
   const usize h = (n < 8) ? n : 8;
   for ( usize i = 0; i < h; ++i )
-    if ( p[i] != fp_byte(idx, gen, i) )
-      return false;
+    if ( p[i] != fp_byte(idx, gen, i) ) return false;
   if ( n > 16 ) {
     const usize m = n / 2;
     for ( usize i = 0; i < 8; ++i )
-      if ( p[m + i] != fp_byte(idx, gen, m + i) )
-        return false;
+      if ( p[m + i] != fp_byte(idx, gen, m + i) ) return false;
   }
   if ( n > 8 ) {
     const usize t = n - 8;
     for ( usize i = 0; i < 8; ++i )
-      if ( p[t + i] != fp_byte(idx, gen, t + i) )
-        return false;
+      if ( p[t + i] != fp_byte(idx, gen, t + i) ) return false;
   }
   return true;
 }
@@ -133,8 +133,7 @@ inline void
 fp_write(byte *p, usize n, usize idx, usize gen) noexcept
 {
   if ( n <= ABC_FP_FULL_LIMIT ) {
-    for ( usize i = 0; i < n; ++i )
-      p[i] = fp_byte(idx, gen, i);
+    for ( usize i = 0; i < n; ++i ) p[i] = fp_byte(idx, gen, i);
   } else {
     fp_write_canary(p, n, idx, gen);
   }
@@ -145,8 +144,7 @@ fp_check(const byte *p, usize n, usize idx, usize gen) noexcept
 {
   if ( n <= ABC_FP_FULL_LIMIT ) {
     for ( usize i = 0; i < n; ++i )
-      if ( p[i] != fp_byte(idx, gen, i) )
-        return false;
+      if ( p[i] != fp_byte(idx, gen, i) ) return false;
     return true;
   }
   return fp_check_canary(p, n, idx, gen);
@@ -200,8 +198,8 @@ sample_size_longtail(rng_t &r) noexcept
 inline usize
 sample_size_pinned(rng_t &r) noexcept
 {
-  const usize lo = SZ_SMALL;          // 512
-  const usize hi = SZ_LARGE / 4u;     // 8192
+  const usize lo = SZ_SMALL;           // 512
+  const usize hi = SZ_LARGE / 4u;      // 8192
   return lo + static_cast<usize>(r.next() % (hi - lo + 1));
 }
 
@@ -211,9 +209,9 @@ struct counts {
   u64 allocs = 0;
   u64 frees = 0;
   u64 reallocs = 0;
-  u64 verifies = 0;        // total fingerprint checks performed
-  u64 hard_errors = 0;     // genuine corruption (fingerprint mismatch on a live block)
-  u64 soft = 0;            // tolerated: realloc prefix not preserved (buddy-tier query_size under-report)
+  u64 verifies = 0;         // total fingerprint checks performed
+  u64 hard_errors = 0;      // genuine corruption (fingerprint mismatch on a live block)
+  u64 soft = 0;             // tolerated: realloc prefix not preserved (buddy-tier query_size under-report)
   // pin first failure for post-mortem
   u64 first_idx = 0;
   u64 first_gen = 0;
@@ -235,12 +233,12 @@ struct counts {
 
 // ── live-set: O(1) random-probe slot table ──────────────────────────────────
 
-template <usize N> struct live_set {
+template<usize N> struct live_set {
   byte *ptr[N];
   usize sz[N];
   u32 gen[N];
   usize live;
-  usize owner;     // fp idx = owner * N + slot, globally unique across threads
+  usize owner;      // fp idx = owner * N + slot, globally unique across threads
 
   void
   init(usize owner_id) noexcept
@@ -270,13 +268,13 @@ template <usize N> struct live_set {
 // ── per-op primitives (the gen-bump + fingerprint protocol, shared by all) ───
 
 // alloc size n into a free slot s, fingerprint it, bump its generation.
-template <usize N>
+template<usize N>
 inline bool
 do_alloc(live_set<N> &ls, usize s, usize n, counts &c) noexcept
 {
   byte *p = abc::alloc(n);
   if ( !p ) [[unlikely]]
-    return false;     // OOM
+    return false;      // OOM
   const u32 g = ++ls.gen[s];
   fp_write(p, n, ls.key(s), g);
   ls.ptr[s] = p;
@@ -287,13 +285,12 @@ do_alloc(live_set<N> &ls, usize s, usize n, counts &c) noexcept
 }
 
 // verify the live block in slot s, then free it.
-template <usize N>
+template<usize N>
 inline void
 do_free(live_set<N> &ls, usize s, counts &c) noexcept
 {
   ++c.verifies;
-  if ( !fp_check(ls.ptr[s], ls.sz[s], ls.key(s), ls.gen[s]) )
-    c.note_error(ls.key(s), ls.gen[s], 0);
+  if ( !fp_check(ls.ptr[s], ls.sz[s], ls.key(s), ls.gen[s]) ) c.note_error(ls.key(s), ls.gen[s], 0);
   abc::dealloc(ls.ptr[s]);
   ls.ptr[s] = nullptr;
   ls.sz[s] = 0;
@@ -303,15 +300,14 @@ do_free(live_set<N> &ls, usize s, counts &c) noexcept
 
 // verify the live block, realloc it to nn, soft-check prefix preservation, then
 // re-fingerprint the (possibly moved/resized) block under a fresh generation.
-template <usize N>
+template<usize N>
 inline bool
 do_realloc(live_set<N> &ls, usize s, usize nn, counts &c) noexcept
 {
   const usize oldn = ls.sz[s];
   const u32 oldg = ls.gen[s];
   ++c.verifies;
-  if ( !fp_check(ls.ptr[s], oldn, ls.key(s), oldg) )
-    c.note_error(ls.key(s), oldg, 0);
+  if ( !fp_check(ls.ptr[s], oldn, ls.key(s), oldg) ) c.note_error(ls.key(s), oldg, 0);
   byte *q = static_cast<byte *>(abc::realloc(ls.ptr[s], nn));
   if ( !q ) [[unlikely]]
     return false;
@@ -320,8 +316,7 @@ do_realloc(live_set<N> &ls, usize s, usize nn, counts &c) noexcept
   // old block was fully fingerprinted (<= limit).
   if ( oldn <= ABC_FP_FULL_LIMIT ) {
     const usize pre = mn(oldn, nn);
-    if ( !fp_check(q, pre, ls.key(s), oldg) )
-      ++c.soft;
+    if ( !fp_check(q, pre, ls.key(s), oldg) ) ++c.soft;
   }
   const u32 ng = ++ls.gen[s];
   fp_write(q, nn, ls.key(s), ng);
@@ -333,51 +328,46 @@ do_realloc(live_set<N> &ls, usize s, usize nn, counts &c) noexcept
 
 // one random-probe op (alloc into a free slot / free or realloc a live one).
 // occupancy self-balances toward alloc_pct/(alloc_pct+free_pct).
-template <usize N>
+template<usize N>
 inline void
 churn_step(live_set<N> &ls, rng_t &r, counts &c, u32 alloc_pct, u32 free_pct) noexcept
 {
   const u32 op = static_cast<u32>(r.next() % 100u);
   const usize s = static_cast<usize>(r.next() % N);
   if ( op < alloc_pct ) {
-    if ( ls.ptr[s] == nullptr )
-      do_alloc(ls, s, sample_size_longtail(r), c);
+    if ( ls.ptr[s] == nullptr ) do_alloc(ls, s, sample_size_longtail(r), c);
   } else if ( op < alloc_pct + free_pct ) {
-    if ( ls.ptr[s] )
-      do_free(ls, s, c);
+    if ( ls.ptr[s] ) do_free(ls, s, c);
   } else {
-    if ( ls.ptr[s] )
-      do_realloc(ls, s, sample_size_longtail(r), c);
+    if ( ls.ptr[s] ) do_realloc(ls, s, sample_size_longtail(r), c);
   }
 }
 
 // verify every live block without freeing (periodic sweep / long-lived cohort).
-template <usize N>
+template<usize N>
 inline void
 verify_all(live_set<N> &ls, counts &c) noexcept
 {
   for ( usize i = 0; i < N; ++i ) {
     if ( ls.ptr[i] ) {
       ++c.verifies;
-      if ( !fp_check(ls.ptr[i], ls.sz[i], ls.key(i), ls.gen[i]) )
-        c.note_error(ls.key(i), ls.gen[i], 0);
+      if ( !fp_check(ls.ptr[i], ls.sz[i], ls.key(i), ls.gen[i]) ) c.note_error(ls.key(i), ls.gen[i], 0);
     }
   }
 }
 
 // verify + free every live block (teardown).
-template <usize N>
+template<usize N>
 inline void
 drain_all(live_set<N> &ls, counts &c) noexcept
 {
   for ( usize i = 0; i < N; ++i )
-    if ( ls.ptr[i] )
-      do_free(ls, i, c);
+    if ( ls.ptr[i] ) do_free(ls, i, c);
 }
 
 // aggregate the per-thread counts of an array of worker contexts (each must
 // expose a `counts cnt` member). hard_errors / allocs==frees are the verdict.
-template <typename Ctx>
+template<typename Ctx>
 inline counts
 sum_counts(const Ctx *ctx, usize n) noexcept
 {
@@ -416,18 +406,18 @@ sum_counts(const Ctx *ctx, usize n) noexcept
 // over millions of ops a genuine double-alloc is still caught on the tracked
 // majority, and the structure stays trivially race-free.
 struct live_registry {
-  static constexpr usize __bits = 20;     // 1M slots * 8B = 8 MiB
+  static constexpr usize __bits = 20;      // 1M slots * 8B = 8 MiB
   static constexpr usize __size = usize(1) << __bits;
   static constexpr usize __mask = __size - 1;
 
-  micron::atomic_token<u64> slot[__size];     // 0 = empty, else a live address
-  micron::atomic_token<u64> collisions;       // double-occupancy events
-  micron::atomic_token<u64> tracked;          // currently-inserted entries
+  micron::atomic_token<u64> slot[__size];      // 0 = empty, else a live address
+  micron::atomic_token<u64> collisions;        // double-occupancy events
+  micron::atomic_token<u64> tracked;           // currently-inserted entries
 
   static usize
   bucket(u64 a) noexcept
   {
-    a >>= 4;     // drop the 16-byte alignment bits
+    a >>= 4;      // drop the 16-byte alignment bits
     a *= 0x9E3779B97F4A7C15ull;
     return static_cast<usize>(a >> (64 - __bits)) & __mask;
   }
@@ -441,13 +431,13 @@ struct live_registry {
     u64 expected = 0;
     if ( slot[b].compare_exchange_strong(expected, a, micron::memory_order_acq_rel, micron::memory_order_acquire) ) {
       tracked.fetch_add(1, micron::memory_order_relaxed);
-      return false;     // inserted into an empty slot
+      return false;      // inserted into an empty slot
     }
-    if ( expected == a ) {     // the address is ALREADY live -> double alloc
+    if ( expected == a ) {      // the address is ALREADY live -> double alloc
       collisions.fetch_add(1, micron::memory_order_acq_rel);
       return true;
     }
-    return false;     // bucket busy with a different addr -> not tracked
+    return false;      // bucket busy with a different addr -> not tracked
   }
 
   void
@@ -464,8 +454,7 @@ struct live_registry {
   void
   reset() noexcept
   {
-    for ( usize i = 0; i < __size; ++i )
-      slot[i].store(0ull, micron::memory_order_relaxed);
+    for ( usize i = 0; i < __size; ++i ) slot[i].store(0ull, micron::memory_order_relaxed);
     collisions.store(0ull, micron::memory_order_relaxed);
     tracked.store(0ull, micron::memory_order_relaxed);
   }
@@ -477,21 +466,21 @@ struct live_registry {
 // micron::thread is mmap-backed and movable-but-not-here: we placement-new each
 // thread in-place (no move => no double-join from the unnulled attr pid) and
 // join+destroy them explicitly. mmap stacks mean no parent-stack 32-thread cliff.
-template <typename Ctx>
+#ifndef ABC_RIGOR_ST_ONLY
+template<typename Ctx>
 inline void
 run_workers(void (*fn)(Ctx *), Ctx *ctx, usize n) noexcept
 {
   using T = micron::thread<>;
-  if ( n > ABC_MAX_WORKERS )
-    n = ABC_MAX_WORKERS;
+  if ( n > ABC_MAX_WORKERS ) n = ABC_MAX_WORKERS;
   alignas(T) byte buf[ABC_MAX_WORKERS * sizeof(T)];
   T *pool = reinterpret_cast<T *>(buf);
-  for ( usize i = 0; i < n; ++i )
-    ::new (static_cast<void *>(pool + i)) T{ fn, ctx + i };
+  for ( usize i = 0; i < n; ++i ) ::new (static_cast<void *>(pool + i)) T{ fn, ctx + i };
   for ( usize i = 0; i < n; ++i ) {
     pool[i].join();
     pool[i].~T();
   }
 }
+#endif
 
-};     // namespace abctest
+};      // namespace abctest

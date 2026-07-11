@@ -1,3 +1,7 @@
+// [abcmalloc mirror] canonical umbrella first: cmalloc.hpp #defines
+// MICRON_ABCMALLOC_DISABLE_STD so micron-core headers use THIS standalone
+// allocator instead of pulling their own in-tree copy.
+#include "../../src/cmalloc.hpp"
 //  Copyright (c) 2024- David Lucius Severus
 //
 //  Distributed under the Boost Software License, Version 1.0.
@@ -8,14 +12,12 @@
 // invariants, allocator_small routing, tombstone reclaim, provenance & freeze,
 // alignment & redzone-friendly patterns.
 
+#include <micron/io/console.hpp>
 
 #include "../../src/cmalloc.hpp"
 #include "../../src/__abc.hpp"
 #include "../../src/config.hpp"
 #include "../../src/malloc.hpp"
-
-
-#include <micron/io/console.hpp>
 
 #include <micron/array.hpp>
 #include <micron/string/strings.hpp>

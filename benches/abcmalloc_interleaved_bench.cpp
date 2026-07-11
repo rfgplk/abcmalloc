@@ -34,15 +34,11 @@
 
 #include "../external/bbench/bench.hpp"
 
-#include "../src/cmalloc.hpp"
-#include "../src/io/console.hpp"
-#include "../src/io/stdout.hpp"
-#include "../src/linux/sys/sched.hpp"
-#include "../src/math/rng.hpp"
-#include "../src/memory/allocation/abcmalloc/__abc.hpp"
-#include "../src/memory/allocation/abcmalloc/config.hpp"
-#include "../src/memory/allocation/abcmalloc/malloc.hpp"
-#include "../src/std.hpp"
+#include <micron/io/console.hpp>
+#include <micron/io/stdout.hpp>
+#include <micron/linux/sys/sched.hpp>
+#include <micron/math/rng.hpp>
+#include <micron/std.hpp>
 
 namespace
 {

@@ -5,6 +5,9 @@
 //  http://www.boost.org/LICENSE_1_0.txt
 #pragma once
 
+// NOTE: pulls directly from the local micron source tree via relative includes
+// (../../src), so no system-wide install is required and tests always build
+// against the in-tree headers rather than a stale /usr/include/micron copy.
 #include <micron/std.hpp>
 
 #include <micron/concepts.hpp>
@@ -44,7 +47,7 @@ constexpr static const bool __default_else_throw_on_require = false;
 [[noreturn]] inline void
 __exit(void)
 {
-  micron::sys_exit(6);
+  micron::sys_exit(0);
 }
 
 [[noreturn]] inline void
@@ -53,9 +56,13 @@ __abort(void)
   if constexpr ( config::__default_abort_on_require ) {
     __exit();
   } else if constexpr ( config::__default_else_throw_on_require ) {
+#if !defined(__micron_freestanding) || defined(__micron_eh)
     throw micron::runtime{ "snowball exception in abort()" };
+#else
+    micron::sys_exit(0);      // -k (no exceptions): cannot throw, just exit
+#endif
   }
-  micron::sys_exit(6);
+  micron::sys_exit(0);
 }
 
 template<typename... T>
