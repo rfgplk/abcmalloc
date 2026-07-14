@@ -1792,9 +1792,6 @@ public:
   bool
   present(addr_t *mem) const
   {
-    // "live block we own": located & allocated (__vmap_locate_at) AND not parked in a
-    // per-class free cache. Cached blocks keep __block_alloc for fast reuse, so the
-    // header/tag alone reports them present -- the cache-membership check excludes them.
     return mem ? (__vmap_locate_at(mem) && !__is_cached(reinterpret_cast<byte *>(mem))) : false;
   }
 

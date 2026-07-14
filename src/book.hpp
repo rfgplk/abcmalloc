@@ -203,9 +203,6 @@ public:
     if ( _p == nullptr ) return false;
     if ( empty() ) micron::abort();
     if ( _p == nullptr ) micron::abort();
-    // present() == "a live block we own": the block must be currently allocated, not
-    // merely un-tombstoned. Keying on !tombstoned alone reported freed (but not-yet-
-    // tombstoned) blocks as present, and was inconsistent between dealloc and retire.
     return __book.is_allocated(_p) && !__book.is_tombstoned(_p);
   }
 
@@ -470,8 +467,6 @@ public:
     if ( _p == nullptr ) return false;
     if ( empty() ) micron::abort();
     if ( _p == nullptr ) micron::abort();
-    // present() == "a live block we own": allocated AND not tombstoned (see the
-    // matching note on the small-sheet find() above).
     return __book.is_allocated(_p) && !__book.is_tombstoned(_p);
   }
 
