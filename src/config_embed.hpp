@@ -51,8 +51,8 @@ constexpr static const usize __class_huge = (1 << __class_huge_shift);
 constexpr static const usize __class_1mb = (1 << __class_1mb_shift);
 constexpr static const usize __class_gb = (1 << __class_gb_shift);
 
-// 32 MB hard ceiling
-constexpr static const usize __alloc_limit = (32 << 20);
+// 64 MB hard ceiling
+constexpr static const usize __alloc_limit = (64 << 20);
 
 // these two switches determine the number of *pages* to allocate on initialization, by default, it's 512 pages for the
 // internal abcmalloc metabuffer, and a minimum of 16 per each new sheet allocation
@@ -91,9 +91,9 @@ constexpr static const bool __default_lazy_construct = true;
 constexpr static const bool __default_single_instance = true;       // enable an allocator per thread (DEPRECATED for now)
 constexpr static const bool __default_global_instance = false;      // enable a single global allocator (DEPRECATED for now)
 // freestanding builds have no threading runtime, unless one is asked for
-// NOTE: define MICRON_ABC_MT when a freestanding build spawns threads or uses coroutines
 #if defined(__micron_freestanding) && !defined(MICRON_ABC_MT)
 constexpr static const bool __default_multithread_safe = false;
+#define __micron_abc_mt_resolved 1
 #else
 constexpr static const bool __default_multithread_safe = true;      // essentially, enables locks across API calls
 #endif
