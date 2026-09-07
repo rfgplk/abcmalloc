@@ -14,7 +14,14 @@ _inc = re.compile(r'^(\s*#\s*include\s*)"([^"]+)"(.*)$')
 _src = re.compile(r'^((?:\.\./)+)src/(.*)$')
 _abc = re.compile(r'^(?:memory/)?allocation/abcmalloc/(.+)$')
 
-_DROP_BENCH = {"malloc_pathways_bench.cpp", "malloc_pathways_mt_bench.cpp"}
+# These files are mirror-owned benchmark programs.  Their local copies are
+# intentionally benchmarked against src/cmalloc.hpp and must survive a
+# refresh of the installed-micron bbench headers.
+_DROP_BENCH = {
+    "abcmalloc_bench.cpp", "abcmalloc_hot_bench.cpp", "abcmalloc_interleaved_bench.cpp",
+    "abcmalloc_latency_bench.cpp", "malloc_pathways_bench.cpp", "malloc_pathways_mt_bench.cpp",
+}
+_KEEP_BENCH_HEADERS = {"bench.hpp"}
 
 
 def convert(line: str) -> str | None:
@@ -32,14 +39,17 @@ def convert(line: str) -> str | None:
 
 
 def main() -> None:
-    # 1) vendor bbench verbatim
+    # 1) vendor bbench headers, preserving the local bench.hpp guard.
     dst_bb = os.path.join(ROOT, "external", "bbench")
     os.makedirs(dst_bb, exist_ok=True)
     n_bb = 0
     for h in sorted(glob.glob(os.path.join(MICRON, "external", "bbench", "*.hpp"))):
+        if os.path.basename(h) in _KEEP_BENCH_HEADERS and os.path.exists(os.path.join(dst_bb, os.path.basename(h))):
+            continue
         shutil.copy2(h, os.path.join(dst_bb, os.path.basename(h)))
         n_bb += 1
-    # 2) refresh only the (non-threaded) benches the mirror already ships
+    # 2) refresh only non-local benches; local benchmark sources are never
+    # overwritten by the installed-micron mirror flow.
     n_b = 0
     for p in sorted(glob.glob(os.path.join(MICRON, "benches", "*.cpp"))):
         b = os.path.basename(p)

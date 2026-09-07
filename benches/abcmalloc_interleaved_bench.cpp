@@ -32,7 +32,11 @@
 // Memory: round-trip pattern, one pointer live at a time. Peak working
 // set per cell <= 16 KiB regardless of count.
 
+#include "bench_common.hpp"
+#include "../src/cmalloc.hpp"
 #include "../external/bbench/bench.hpp"
+
+static_assert(!abc::__default_multithread_safe, "single-thread bbench must compile with allocator locks disabled");
 
 #include <micron/io/console.hpp>
 #include <micron/io/stdout.hpp>
@@ -348,10 +352,7 @@ sweep_interleaved()
 int
 main(void)
 {
-  micron::posix::cpu_set_t set;
-  set.cpu_zero();
-  set.cpu_set(0);
-  micron::posix::sched_setaffinity(0, sizeof(set), set);
+  const int cpu = abcmalloc_bench::pin_from_environment();
 
   {
     byte *w0 = abc::alloc(16);
@@ -365,6 +366,9 @@ main(void)
   }
 
   micron::io::println("=== abcmalloc interleaved-alloc benchmark ===");
+  micron::io::println("implementation: local src/cmalloc.hpp (abcmalloc)");
+  micron::io::println("cpu: ", cpu);
+  micron::io::println("threading: single-threaded (allocator locks disabled)");
   micron::io::println("sizes prefilled into static array via micron::math::rng::xoshiro256ss + dist::uniform_int");
   micron::io::println("brackets span up to four tiers (precise / small / medium / large) per pass");
   micron::io::println("warmup: ", WARMUP_PASSES, " untimed pass; ", K_MEASUREMENTS, " measured passes per cell (median reported)");

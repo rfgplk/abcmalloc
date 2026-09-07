@@ -5,9 +5,17 @@
 
 #pragma once
 
+#if defined(ABCMALLOC_LOCAL_BENCH)
+
+// Local abcmalloc benches use only the event_group/timing API.  The full
+// driver API below pulls micron's process/clone stack, which intentionally
+// owns a different installed abcmalloc copy.
+#include "clock.hpp"
+
+#else
+
 #include <micron/concepts.hpp>
 #include <micron/memory/actions.hpp>
-#include <micron/proc.hpp>
 #include <micron/string/string.hpp>
 #include <micron/type_traits.hpp>
 #include <micron/types.hpp>
@@ -17,7 +25,10 @@
 #include "events.hpp"
 #include "funcs.hpp"
 #include "options.hpp"
+#if !defined(ABCMALLOC_LOCAL_BENCH)
+#include <micron/proc.hpp>
 #include "process.hpp"
+#endif
 
 namespace bbench
 {
@@ -395,3 +406,5 @@ bench_repeat(F func, Args... args)
 }
 
 };      // namespace bbench
+
+#endif      // ABCMALLOC_LOCAL_BENCH

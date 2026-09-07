@@ -28,6 +28,12 @@ cflags_gnu_debug =  -std=c++23 $cflags_debug $cflags_warn_base $cflags_warn_opti
 cflags_gnu =  -std=c++23 $cflags_optimizations $cflags_warn_base $cflags_warn_options $cflags_warn_ignore $cflags_extra_errors $cflags_ext
 cflags_gnuc =  -std=c11 $cflags_optimizations $cflags_warn_base $cflags_ext
 cflags_llvm =  -std=c++23 $cflags_optimizations $cflags_warn_all_llvm $cflags_ext_llvm
+
+# Hosted benchmarks deliberately use the local src/ allocator.  bbench's
+# optional process helpers pull micron's installed allocator through clone.hpp;
+# keep those helpers out of the local benchmark translation units.
+bench_common_flags = -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH
+bench_single_thread_flags = $bench_common_flags -DMICRON_ABC_SINGLE_THREADED
 compile_flags_std = -lc -lgcc -lgcc_s -lstdc++ -lm
 compile_flags_start = -c
 
@@ -53,6 +59,9 @@ rule cc_compile_cmnd_doctor
 # its MT worker machinery (which pulls micron's thread subsystem -> ODR-collides with src/)
 rule cc_compile_cmnd_st_rigor
   command = echo -e "\n\n\033[1;32mBuilding (st):\033[0m $out" && $timer $compiler_gnu $cflags_gnu -DABC_RIGOR_ST_ONLY $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
+
+rule cc_compile_bench
+  command = echo -e "\n\n\033[1;32mBuilding benchmark:\033[0m $out" && $compiler_gnu $bench_single_thread_flags $clibs_location $clibs_includes $in $compile_flags_std -o $build_directory/$out;
 
 build bench_abcmalloc_cycles: cc_compile_cmnd tests/general/abcmalloc_bench_abc_cycles.cpp
 build bench_malloc_pages: cc_compile_cmnd tests/general/abcmalloc_bench_pages.cpp
@@ -80,7 +89,7 @@ build test_abcmalloc_broad: cc_compile_cmnd tests/broad.cpp
 build test_abcmalloc_thread: cc_compile_cmnd tests/threading.cpp
 build test_abcmalloc_primary: cc_compile_cmnd tests/primary.cpp
 
-build abcmalloc_benches: phony bench_abcmalloc_4gb bench_abcmalloc_large bench_abcmalloc_large_freq  bench_abcmalloc_small bench_abcmalloc bench_base_malloc
+build abcmalloc_benches: phony bench_abcmalloc_4gb bench_abcmalloc_large bench_abcmalloc_large_freq bench_abcmalloc_small bench_abcmalloc bench_base_malloc abcmalloc_readme_benchmarks
 
 # ---- functional tests synced from micron (scripts/sync_tests_from_micron.py) ----
 # core: focused unit tests
@@ -116,11 +125,26 @@ build abcmalloc_rigor: phony test_rigor_abcmalloc test_rigor_persistent test_rig
 build abcmalloc_doctor: phony test_doctor_faults test_doctor_overflow test_doctor_selftests test_doctor_structdump test_doctor_wild
 build abcmalloc_tests: phony abcmalloc_core abcmalloc_rigor abcmalloc_doctor
 
-# ---- bbench-driven benches (benches/, vendored external/bbench) ----
-# these benchmark the installed micron allocator (MICRON_ABCMALLOC_STD); bbench pulls
-# the thread subsystem, so they cannot also load the local src/ copy -- see
-# scripts/sync_benches_from_micron.py
-build bbench_abc: cc_compile_cmnd benches/abcmalloc_bench.cpp
-build bbench_abc_hot: cc_compile_cmnd benches/abcmalloc_hot_bench.cpp
-build bbench_abc_interleaved: cc_compile_cmnd benches/abcmalloc_interleaved_bench.cpp
+# ---- bbench-driven local benches (benches/, vendored external/bbench) ----
+# These targets include the checkout's src/cmalloc.hpp.  The local-bench guard
+# keeps bbench's optional process helpers from pulling the installed allocator
+# into the same translation unit.
+build bbench_abc: cc_compile_bench benches/abcmalloc_bench.cpp
+build bbench_abc_hot: cc_compile_bench benches/abcmalloc_hot_bench.cpp
+build bbench_abc_interleaved: cc_compile_bench benches/abcmalloc_interleaved_bench.cpp
 build abcmalloc_bbench: phony bbench_abc bbench_abc_hot bbench_abc_interleaved
+
+# ---- local hosted benchmarks and direct-symbol comparison suite ----
+# ABCMALLOC_DISABLE is set in the comparison sources so glibc's global C
+# symbols remain untouched.  The comparison links are intentionally explicit:
+# -ltcmalloc and -ltbbmalloc provide tc_* and scalable_* without interposition.
+rule cc_compile_comparison
+  command = echo -e "\n\n\033[1;32mBuilding comparison benchmark:\033[0m $out" && $compiler_gnu $bench_common_flags $clibs_location $clibs_includes $in -lpthread -ldl -l:libtcmalloc.so.4 -ltbbmalloc -lmimalloc -ljemalloc -o $build_directory/$out;
+
+rule cc_compile_comparison_st
+  command = echo -e "\n\n\033[1;32mBuilding single-thread comparison benchmark:\033[0m $out" && $compiler_gnu $bench_single_thread_flags $clibs_location $clibs_includes $in -lpthread -ldl -l:libtcmalloc.so.4 -ltbbmalloc -lmimalloc -ljemalloc -o $build_directory/$out;
+
+build bench_abcmalloc_latency: cc_compile_bench benches/abcmalloc_latency_bench.cpp
+build bench_abcmalloc_pathways: cc_compile_comparison_st benches/malloc_pathways_bench.cpp
+build bench_abcmalloc_pathways_mt: cc_compile_comparison benches/malloc_pathways_mt_bench.cpp
+build abcmalloc_readme_benchmarks: phony bbench_abc bbench_abc_hot bbench_abc_interleaved bench_abcmalloc_latency bench_abcmalloc_pathways bench_abcmalloc_pathways_mt

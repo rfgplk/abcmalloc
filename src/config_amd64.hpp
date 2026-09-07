@@ -21,8 +21,13 @@
 
 #pragma once
 
-// temporary workaround
+// Hosted builds default to the thread-safe allocator.  Single-threaded
+// benchmarks may opt into the lock-free compile-time profile explicitly.
+#if defined(MICRON_ABC_SINGLE_THREADED)
+#undef MICRON_ABC_MT
+#else
 #define MICRON_ABC_MT 1
+#endif
 
 #include <micron/bits/__profile.hpp>
 #include <micron/memory/allocation/kmemory.hpp>
@@ -87,7 +92,10 @@ constexpr static const bool __default_lazy_construct = true;        // should bu
 constexpr static const bool __default_single_instance = true;       // enable an allocator per thread (DEPRECATED for now)
 constexpr static const bool __default_global_instance = false;      // enable a single global allocator (DEPRECATED for now)
 // freestanding builds have no threading runtime, unless one is asked for
-#if defined(__micron_freestanding) && !defined(MICRON_ABC_MT)
+#if defined(MICRON_ABC_SINGLE_THREADED)
+constexpr static const bool __default_multithread_safe = false;
+#define __micron_abc_mt_resolved 0
+#elif defined(__micron_freestanding) && !defined(MICRON_ABC_MT)
 constexpr static const bool __default_multithread_safe = false;
 #define __micron_abc_mt_resolved 1
 #else

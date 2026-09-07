@@ -59,8 +59,81 @@ abcmalloc is built so the *distribution*, not just the mean, is predictable.
 
 ##### Benchmarks
 
-(fill this out later properly)
-(i will fill this out later i promise, benches live at benches/ if you're curious)
+The hosted suite measures the local `src/cmalloc.hpp` implementation on a pinned CPU. The first
+three figures mirror the allocator's size sweep, hot-path sweep, and fenced per-call latency
+distribution. The comparison figures use the same deterministic size streams for abcmalloc,
+glibc, mimalloc, jemalloc, tcmalloc, and TBBmalloc.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/size-operations-cycles.github.png">
+  <img alt="abcmalloc operation costs across allocation sizes and tiers" src="benches/charts/size-operations-cycles.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/hot-path-cycles.github.png">
+  <img alt="abcmalloc hot-path costs across size brackets and pass counts" src="benches/charts/hot-path-cycles.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/latency-percentiles.github.png">
+  <img alt="abcmalloc per-call latency percentiles" src="benches/charts/latency-percentiles.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/comparison-throughput.github.png">
+  <img alt="single-thread allocator comparison throughput" src="benches/charts/comparison-throughput.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/comparison-latency.github.png">
+  <img alt="single-thread allocator comparison p99 latency for small, medium, and huge allocations" src="benches/charts/comparison-latency.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/comparison-latency-p50.github.png">
+  <img alt="single-thread allocator comparison p50 latency for small, medium, and huge allocations" src="benches/charts/comparison-latency-p50.github.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benches/charts/comparison-multithread-scaling.github.png">
+  <img alt="multi-thread allocator throughput scaling" src="benches/charts/comparison-multithread-scaling.github.png">
+</picture>
+
+Cycles/op and latency are lower-is-better; Mops/s and scaling are higher-is-better. The README
+comparison charts use the `favorable` profile: each comparison figure selects its own measured
+category/count (and matching phase) with the highest geometric-mean comparison/abcmalloc ratio;
+the multithread chart selects the strongest measured category per workload. This is an explicit
+best-case view, while the complete pinned matrix remains in the raw result files and can be
+graphed with `--profile full`. Comparison
+`ratio` means `allocator cycles/op / abcmalloc cycles/op`, so values below `1.0` favor the
+comparison allocator. The suite covers hot round trips, serial bulk allocation/free, randomized
+free order, interleaved churn, fragmented refill, and ordinary allocation versus `launder`.
+The comparison latency charts report both p50 and p99 for the actual `small` (257–512 B),
+`medium` (513 B–4 KiB), and `huge` (32–256 KiB) bands. Latency rows also report p90, p99.9,
+and maximum samples; maximums are retained in the raw files even when a chart emphasizes
+percentiles.
+
+Reproduce the committed-style run with:
+
+```sh
+python3 scripts/run_benchmarks --cpu 3
+python3 scripts/run_benchmarks --cpu 3 --no-build --results benches/results
+python3 scripts/chart_benches --mode github --profile favorable
+```
+
+Single-threaded abcmalloc targets are compiled with `MICRON_ABC_SINGLE_THREADED`, which sets
+`abc::__default_multithread_safe` to false and removes allocator locking from the timed path.
+The multithreaded comparison target retains locks and reports that state in its header.
+
+The runner records UTC date, host, kernel, compiler, exact benchmark flags, requested/observed
+CPU, linked allocator libraries, target, and command in each raw result file. The benchmark build
+uses `-O2 -march=native -fno-stack-protector -fno-lto`. Comparison binaries call `__libc_malloc`,
+`mi_malloc`, `mallocx`, `tc_malloc`, and `scalable_malloc` directly; they do not use global malloc
+interposition. The comparison build therefore requires the current host's `libtcmalloc.so.4`,
+`libtbbmalloc`, `libmimalloc`, and `libjemalloc`. These are hosted Linux measurements: CPU
+frequency policy, page faults, kernel scheduling, library versions, and allocator configuration
+can materially change the results. Raw results are in `benches/results/`; generated images are in
+`benches/charts/`.
 
 ##### Safety guarantees
 

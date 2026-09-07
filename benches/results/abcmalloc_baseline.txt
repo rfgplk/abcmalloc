@@ -1,0 +1,162 @@
+# abcmalloc baseline
+# date: 2026-09-07T19:39:33Z
+# host: Intel(R) Core(TM) i7-5960X CPU @ 3.00GHz
+# kernel: 7.1.13-200.fc44.x86_64
+# cpu_requested: 3
+# cpu_observed: 3
+# compiler: g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+# flags: -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH -DMICRON_ABC_SINGLE_THREADED
+# build: ninja abcmalloc_readme_benchmarks
+# target: bin/bbench_abc
+# libraries: none
+# run: taskset -c 3 /code/C++/abcmalloc/bin/bbench_abc
+# runner: scripts/run_benchmarks --cpu 3 --no-build --results benches/results
+=== abcmalloc benchmark ===
+implementation: local src/cmalloc.hpp (abcmalloc)
+cpu: 3
+threading: single-threaded (allocator locks disabled)
+sizes: 16 B .. 16 MiB (spans precise -> gb tier)
+warmup: 2 kernel reps; 5 measurements per cell (median)
+perf events: cycles + instructions + branches + branch-misses (bbench 4-event group)
+memory budget: peak live <= 32 MiB per cell; total RSS << 4 GiB
+
+[round-trip] alloc(sz) + dealloc(p) paired — hot path
+   size(B)  routine                    ops/rep      cyc/op       IPC    bmiss%
+------------------------------------------------------------------------------
+        16  alloc + dealloc                  2       41.05      1.94      0.00
+        64  alloc + dealloc                  2       20.59      3.86      0.00
+       256  alloc + dealloc                  2       21.58      3.96      0.00
+      1024  alloc + dealloc                  2       22.60      3.89      0.00
+      4096  alloc + dealloc                  2       28.50      3.68      0.00
+     16384  alloc + dealloc                  2       29.19      3.77      0.00
+     65536  alloc + dealloc                  2       31.37      3.70      0.00
+    262144  alloc + dealloc                  2       32.98      3.64      0.01
+   1048576  alloc + dealloc                  2     1529.84      0.27      3.53
+   4194304  alloc + dealloc                  2     1524.85      0.28      3.59
+  16777216  alloc + dealloc                  2     1885.56      0.33      2.95
+
+[variants] salloc / balloc / launder / calloc / aligned_alloc — round-trip
+   size(B)  routine                    ops/rep      cyc/op       IPC    bmiss%
+------------------------------------------------------------------------------
+        16  salloc + dealloc                 2       31.11      3.79      0.00
+        16  balloc + dealloc                 2       22.09      3.85      0.00
+        16  launder + dealloc                2       75.80      3.39      0.00
+        16  calloc(1,sz) + free              2       31.60      3.77      0.00
+        64  salloc + dealloc                 2       31.10      3.79      0.00
+        64  balloc + dealloc                 2       22.09      3.85      0.00
+        64  launder + dealloc                2       78.85      3.26      0.00
+        64  calloc(1,sz) + free              2       31.09      3.80      0.00
+        64  aligned_alloc(64) + a_free       2       92.91      2.62      0.00
+       256  salloc + dealloc                 2       31.10      3.79      0.00
+       256  balloc + dealloc                 2       22.09      3.85      0.00
+       256  launder + dealloc                2       75.88      3.38      0.00
+       256  calloc(1,sz) + free              2       32.09      3.83      0.00
+       256  aligned_alloc(64) + a_free       2       94.95      2.62      0.00
+      1024  salloc + dealloc                 2       42.77      3.31      0.00
+      1024  balloc + dealloc                 2       23.08      3.79      0.00
+      1024  launder + dealloc                2       75.77      3.39      0.00
+      1024  calloc(1,sz) + free              2       44.02      3.67      0.00
+      1024  aligned_alloc(64) + a_free       2      103.55      2.70      0.00
+      4096  salloc + dealloc                 2      650.54      0.21      0.00
+      4096  balloc + dealloc                 2       28.73      3.81      0.00
+      4096  launder + dealloc                2       55.43      3.58      0.00
+      4096  calloc(1,sz) + free              2      106.76      2.57      0.00
+      4096  aligned_alloc(64) + a_free       2      122.30      2.69      0.00
+      4096  aligned_alloc(4096) + a_free     2      120.91      2.74      0.00
+     16384  salloc + dealloc                 2      647.60      0.21      0.00
+     16384  balloc + dealloc                 2       29.01      3.78      0.00
+     16384  launder + dealloc                2       55.79      3.56      0.00
+     16384  calloc(1,sz) + free              2      304.85      0.52      0.00
+     16384  aligned_alloc(64) + a_free       2      122.79      2.68      0.00
+     16384  aligned_alloc(4096) + a_free     2      121.65      2.72      0.00
+
+[pool] N allocs then N frees — alloc/free isolated
+   size(B)  routine                    ops/rep      cyc/op       IPC    bmiss%
+------------------------------------------------------------------------------
+        16  pool-alloc (alloc x N)        1024       70.48      2.67      0.01
+        16  pool-free  (dealloc x N)      1024      101.65      3.69      0.01
+        16  pool-roundtrip (a+f) x N      2048       85.83      3.28      0.02
+        64  pool-alloc (alloc x N)        1024       70.41      2.68      0.01
+        64  pool-free  (dealloc x N)      1024      102.64      3.66      0.01
+        64  pool-roundtrip (a+f) x N      2048       85.62      3.29      0.01
+       256  pool-alloc (alloc x N)        1024      102.58      3.18      0.00
+       256  pool-free  (dealloc x N)      1024      103.62      3.68      0.00
+       256  pool-roundtrip (a+f) x N      2048      102.51      3.45      0.01
+      1024  pool-alloc (alloc x N)        1024       72.99      2.63      0.02
+      1024  pool-free  (dealloc x N)      1024       82.92      3.82      0.01
+      1024  pool-roundtrip (a+f) x N      2048       76.82      3.31      0.02
+      4096  pool-alloc (alloc x N)        1024      114.85      1.62      0.37
+      4096  pool-free  (dealloc x N)      1024      148.10      2.29      0.30
+      4096  pool-roundtrip (a+f) x N      2048      129.86      2.02      0.37
+     16384  pool-alloc (alloc x N)          32      111.41      2.03      0.41
+     16384  pool-free  (dealloc x N)        32      139.91      2.42      0.22
+     16384  pool-roundtrip (a+f) x N        64      113.41      2.49      0.23
+     65536  pool-alloc (alloc x N)          32     1471.69      0.12      7.33
+     65536  pool-free  (dealloc x N)        32      138.25      1.65      0.25
+     65536  pool-roundtrip (a+f) x N        64      795.75      0.26      3.00
+    262144  pool-alloc (alloc x N)          32     1580.41      0.13      6.86
+    262144  pool-free  (dealloc x N)        32      192.84      1.21      0.24
+    262144  pool-roundtrip (a+f) x N        64      882.14      0.25      3.22
+   1048576  pool-alloc (alloc x N)          32     1738.56      0.13      7.66
+   1048576  pool-free  (dealloc x N)        32      248.78      0.98      0.40
+   1048576  pool-roundtrip (a+f) x N        64     1186.30      0.26      4.61
+   4194304  pool-alloc (alloc x N)           8     2156.75      0.16      6.20
+   4194304  pool-free  (dealloc x N)         8      520.38      0.55      1.18
+   4194304  pool-roundtrip (a+f) x N        16     1253.63      0.25      3.43
+  16777216  pool-alloc (alloc x N)           2     4255.50      0.17      4.59
+  16777216  pool-free  (dealloc x N)         2     1950.00      0.26      3.49
+  16777216  pool-roundtrip (a+f) x N         4     2962.25      0.19      4.73
+
+[realloc] alloc(128) -> realloc(big) -> realloc(128) -> free
+   size(B)  routine                    ops/rep      cyc/op       IPC    bmiss%
+------------------------------------------------------------------------------
+       256  malloc/realloc x 2/free          4      109.36      3.48      0.00
+      1024  malloc/realloc x 2/free          4      128.84      3.51      0.00
+      4096  malloc/realloc x 2/free          4      136.95      3.42      0.00
+     16384  malloc/realloc x 2/free          4      137.37      3.41      0.00
+     65536  malloc/realloc x 2/free          4      140.34      3.44      0.00
+    262144  malloc/realloc x 2/free          4      142.29      3.39      0.00
+   1048576  malloc/realloc x 2/free          4      732.00      0.81      1.03
+   4194304  malloc/realloc x 2/free          4      996.78      0.64      1.22
+  16777216  malloc/realloc x 2/free          4     1204.09      0.60      1.37
+
+[queries] is_present / within / query_size / musage
+   size(B)  routine                    ops/rep      cyc/op       IPC    bmiss%
+------------------------------------------------------------------------------
+        16  is_present                       1       92.30      3.21      0.00
+        16  within                           1       41.15      1.58      0.00
+        16  query_size                       1       41.17      2.02      0.00
+        64  is_present                       1       92.58      3.20      0.00
+        64  within                           1       41.16      1.58      0.00
+        64  query_size                       1       41.16      2.02      0.00
+       256  is_present                       1       91.52      3.23      0.00
+       256  within                           1       41.14      1.58      0.00
+       256  query_size                       1       41.15      2.02      0.00
+      1024  is_present                       1       83.19      3.05      0.00
+      1024  within                           1       41.16      2.04      0.00
+      1024  query_size                       1       43.18      2.36      0.00
+      4096  is_present                       1       83.88      3.11      0.00
+      4096  within                           1       43.16      2.39      0.00
+      4096  query_size                       1       55.17      2.41      0.00
+     16384  is_present                       1       84.51      3.09      0.00
+     16384  within                           1       43.59      2.36      0.01
+     16384  query_size                       1       55.62      2.39      0.01
+     65536  is_present                       1       88.54      3.14      0.00
+     65536  within                           1       47.61      2.56      0.01
+     65536  query_size                       1       52.71      2.88      0.01
+    262144  is_present                       1       91.08      3.05      0.01
+    262144  within                           1       49.48      2.47      0.02
+    262144  query_size                       1       54.72      2.78      0.02
+   1048576  is_present                       1      116.61      2.78      0.04
+   1048576  within                           1       72.69      2.36      0.06
+   1048576  query_size                       1       76.83      2.61      0.06
+   4194304  is_present                       1      122.22      2.78      0.03
+   4194304  within                           1       77.36      2.41      0.06
+   4194304  query_size                       1       83.84      2.57      0.08
+  16777216  is_present                       1      174.31      1.95      0.14
+  16777216  within                           1      114.63      1.64      0.24
+  16777216  query_size                       1      122.63      1.77      0.22
+         0  musage()                         1       42.55      3.85      0.00
+
+=== done ===
+(anti-DCE sink: 20218548914144)

@@ -33,7 +33,11 @@
 // across alloc + dealloc), IPC, branch-miss%. Medians across K samples,
 // bbench 4-event group.
 
+#include "bench_common.hpp"
+#include "../src/cmalloc.hpp"
 #include "../external/bbench/bench.hpp"
+
+static_assert(!abc::__default_multithread_safe, "single-thread bbench must compile with allocator locks disabled");
 
 #include <micron/io/console.hpp>
 #include <micron/io/stdout.hpp>
@@ -313,10 +317,7 @@ sweep_random_hot()
 int
 main(void)
 {
-  micron::posix::cpu_set_t set;
-  set.cpu_zero();
-  set.cpu_set(0);
-  micron::posix::sched_setaffinity(0, sizeof(set), set);
+  const int cpu = abcmalloc_bench::pin_from_environment();
 
   {
     byte *warm = abc::alloc(16);
@@ -324,6 +325,9 @@ main(void)
   }
 
   micron::io::println("=== abcmalloc hot-alloc benchmark ===");
+  micron::io::println("implementation: local src/cmalloc.hpp (abcmalloc)");
+  micron::io::println("cpu: ", cpu);
+  micron::io::println("threading: single-threaded (allocator locks disabled)");
   micron::io::println("sizes prefilled into static array via micron::math::rng::xoshiro256ss + dist::uniform_int");
   micron::io::println("brackets: 1-8 / 8-32 / 32-128 / 128-512 / 1-512 (full mix)");
   micron::io::println("counts: 5k, 10k, 100k, 1M alloc/free pairs per pass");

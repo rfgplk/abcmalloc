@@ -83,7 +83,10 @@ constexpr static const bool __default_lazy_construct = true;
 constexpr static const bool __default_single_instance = true;       // enable an allocator per thread (DEPRECATED for now)
 constexpr static const bool __default_global_instance = false;      // enable a single global allocator (DEPRECATED for now)
 // freestanding builds have no threading runtime, unless one is asked for
-#if defined(__micron_freestanding) && !defined(MICRON_ABC_MT)
+#if defined(MICRON_ABC_SINGLE_THREADED)
+constexpr static const bool __default_multithread_safe = false;
+#define __micron_abc_mt_resolved 0
+#elif defined(__micron_freestanding) && !defined(MICRON_ABC_MT)
 constexpr static const bool __default_multithread_safe = false;
 #define __micron_abc_mt_resolved 1
 #else

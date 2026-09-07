@@ -1,0 +1,50 @@
+# abcmalloc_hot baseline
+# date: 2026-09-07T19:39:34Z
+# host: Intel(R) Core(TM) i7-5960X CPU @ 3.00GHz
+# kernel: 7.1.13-200.fc44.x86_64
+# cpu_requested: 3
+# cpu_observed: 3
+# compiler: g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+# flags: -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH -DMICRON_ABC_SINGLE_THREADED
+# build: ninja abcmalloc_readme_benchmarks
+# target: bin/bbench_abc_hot
+# libraries: none
+# run: taskset -c 3 /code/C++/abcmalloc/bin/bbench_abc_hot
+# runner: scripts/run_benchmarks --cpu 3 --no-build --results benches/results
+=== abcmalloc hot-alloc benchmark ===
+implementation: local src/cmalloc.hpp (abcmalloc)
+cpu: 3
+threading: single-threaded (allocator locks disabled)
+sizes prefilled into static array via micron::math::rng::xoshiro256ss + dist::uniform_int
+brackets: 1-8 / 8-32 / 32-128 / 128-512 / 1-512 (full mix)
+counts: 5k, 10k, 100k, 1M alloc/free pairs per pass
+warmup: 1 untimed pass; 5 measured passes per cell (median reported)
+perf events: cycles + instructions + branches + branch-misses (bbench 4-event group)
+peak live working set per cell <= ~512 B (one pointer live at a time)
+
+[hot] alloc(g_sizes[i]) + dealloc(p) per element, sizes prefilled via xoshiro256ss
+bracket            count       ops/rep      cyc/op       IPC      bmiss%
+---------------------------------------------------------------------
+1-8 B               5000         10000       20.07      3.79        0.00
+1-8 B              10000         20000       20.04      3.79        0.00
+1-8 B             100000        200000       20.07      3.79        0.00
+1-8 B            1000000       2000000       20.32      3.74        0.00
+8-32 B              5000         10000       20.06      3.79        0.00
+8-32 B             10000         20000       20.04      3.79        0.00
+8-32 B            100000        200000       20.03      3.79        0.00
+8-32 B           1000000       2000000       20.26      3.75        0.00
+32-128 B            5000         10000       21.08      3.89        0.00
+32-128 B           10000         20000       21.04      3.90        0.00
+32-128 B          100000        200000       21.04      3.90        0.00
+32-128 B         1000000       2000000       21.13      3.88        0.00
+128-512 B           5000         10000       24.08      3.99        0.00
+128-512 B          10000         20000       24.04      3.99        0.00
+128-512 B         100000        200000       24.10      3.98        0.01
+128-512 B        1000000       2000000       24.53      3.91        0.01
+1-512 B             5000         10000       24.13      3.98        0.01
+1-512 B            10000         20000       24.11      3.98        0.01
+1-512 B           100000        200000       24.10      3.98        0.01
+1-512 B          1000000       2000000       24.24      3.96        0.01
+
+=== done ===
+(anti-DCE sink: 2218)

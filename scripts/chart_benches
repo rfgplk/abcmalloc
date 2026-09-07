@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""Validate benchmark result files and render README-ready PNG charts."""
+
+from __future__ import annotations
+
+import argparse
+import math
+import re
+from collections import defaultdict
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+THEMES = {
+    "light": {"surface": "#fcfcfb", "ink": "#111111", "muted": "#5b5a57", "grid": "#dedcd6", "outline": "#111111"},
+    "dark": {"surface": "#1a1a19", "ink": "#ffffff", "muted": "#c3c2b7", "grid": "#3a3a37", "outline": "#0b0b0b"},
+    "github": {"surface": "#0d1117", "ink": "#f0f6fc", "muted": "#9198a1", "grid": "#3d444d", "outline": "#010409"},
+}
+ALLOCATORS = ("abc", "glibc", "mimalloc", "jemalloc", "tcmalloc", "tbbmalloc")
+WORKLOADS = ("hot", "serial", "randomized", "interleaved", "fragmented", "launder")
+LATENCY_CATEGORIES = ("small", "medium", "huge")
+LABELS = {"abc": "abcmalloc", "glibc": "glibc", "mimalloc": "mimalloc", "jemalloc": "jemalloc", "tcmalloc": "tcmalloc", "tbbmalloc": "TBBmalloc"}
+COLORS = {"abc": "#e05a47", "glibc": "#8c8c8c", "mimalloc": "#3987e5", "jemalloc": "#199e70", "tcmalloc": "#d99a28", "tbbmalloc": "#9a63c7"}
+PHASES = {"hot": "roundtrip", "serial": "alloc", "randomized": "random-free",
+          "interleaved": "roundtrip", "fragmented": "roundtrip", "launder": "roundtrip"}
+CATEGORY_LABELS = {"small": "small · 257–512 B", "medium": "medium · 513 B–4 KiB",
+                   "huge": "huge · 32–256 KiB"}
+
+
+def key_values(line: str) -> dict[str, str]:
+    return dict(re.findall(r"([A-Za-z0-9_]+)=(\S+)", line))
+
+
+def parse_bbench(path: Path) -> tuple[list[dict], list[dict]]:
+    sizes: list[dict] = []
+    hot: list[dict] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split()
+        if not parts or not parts[0].isdigit() or len(parts) < 7:
+            continue
+        try:
+            size = int(parts[0])
+            cycles = float(parts[-3])
+            if not math.isfinite(cycles) or cycles <= 0:
+                continue
+        except ValueError:
+            continue
+        routine = " ".join(parts[1:-4])
+        sizes.append({"size": size, "routine": routine, "cycles": cycles})
+
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = re.match(r"^\s*(.+?)\s+(\d+)\s+(\d+)\s+([0-9.]+)\s+[0-9.]+\s+[0-9.]+$", line)
+        if not match or not match.group(1).endswith("B"):
+            continue
+        hot.append({"bracket": match.group(1).strip(), "count": int(match.group(2)), "cycles": float(match.group(4))})
+    return sizes, hot
+
+
+def parse_rows(path: Path, suite: str, mode: str | None = None) -> list[dict]:
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.startswith("row "):
+            continue
+        row = key_values(line)
+        if row.get("suite") != suite or (mode is not None and row.get("mode") != mode):
+            continue
+        for key in ("count", "threads", "operations"):
+            if key in row:
+                row[key] = int(row[key])
+        for key in ("cycles_per_op", "ns_per_op", "mops_s", "ratio", "scaling", "p50_ns", "p90_ns", "p99_ns", "p999_ns", "max_ns"):
+            if key in row:
+                row[key] = float(row[key])
+        rows.append(row)
+    return rows
+
+
+def style(ax, theme: dict) -> None:
+    ax.set_facecolor(theme["surface"])
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(theme["grid"])
+    ax.tick_params(colors=theme["muted"], labelsize=8)
+    ax.xaxis.label.set_color(theme["muted"])
+    ax.yaxis.label.set_color(theme["muted"])
+    ax.grid(axis="y", color=theme["grid"], linewidth=0.8, alpha=0.75)
+    ax.set_axisbelow(True)
+
+
+def finish(fig, theme: dict, note: str, rect=(0.04, 0.08, 0.99, 0.91)) -> None:
+    fig.text(0.5, 0.018, note, ha="center", color=theme["muted"], fontsize=7.5)
+    fig.tight_layout(rect=rect)
+
+
+def save(fig, path: Path, theme: dict) -> None:
+    fig.savefig(path, dpi=150, facecolor=theme["surface"])
+    plt.close(fig)
+    print(path)
+
+
+def legend(fig, theme: dict, handles: list, labels: list[str]) -> None:
+    leg = fig.legend(handles, labels, loc="upper center", ncol=min(6, len(labels)), framealpha=0.9,
+                     facecolor=theme["surface"], edgecolor=theme["grid"], fontsize=8)
+    for text in leg.get_texts():
+        text.set_color(theme["ink"])
+
+
+def geometric_mean(values: list[float]) -> float:
+    positive = [value for value in values if value > 0.0 and math.isfinite(value)]
+    return math.exp(sum(math.log(value) for value in positive) / len(positive)) if positive else 0.0
+
+
+def favorable_st_case(rows: list[dict], workload: str, phase: str, metric: str) -> tuple[str, int]:
+    groups: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    for row in rows:
+        if row.get("workload") == workload and row.get("phase") == phase and row.get("allocator") in ALLOCATORS:
+            groups[(row["category"], row["count"])].append(row)
+    complete = [(key, group) for key, group in groups.items()
+                if {row["allocator"] for row in group} == set(ALLOCATORS)]
+    if not complete:
+        raise SystemExit(f"chart_benches: no complete single-thread case for {workload}/{phase}")
+    def score(group: list[dict]) -> float:
+        abc = next(row for row in group if row["allocator"] == "abc")
+        return geometric_mean([float(row[metric]) / float(abc[metric]) for row in group if row["allocator"] != "abc"])
+
+    key, _ = max(complete, key=lambda item: score(item[1]))
+    return key
+
+
+def latency_case(rows: list[dict], workload: str, phase: str, category: str, metric: str,
+                 profile: str) -> tuple[str, int]:
+    groups: dict[int, list[dict]] = defaultdict(list)
+    for row in rows:
+        if (row.get("workload") == workload and row.get("phase") == phase and
+                row.get("category") == category and row.get("allocator") in ALLOCATORS):
+            groups[row["count"]].append(row)
+    complete = [(count, group) for count, group in groups.items()
+                if {row["allocator"] for row in group} == set(ALLOCATORS)]
+    if not complete:
+        raise SystemExit(f"chart_benches: no complete latency case for {workload}/{phase}/{category}")
+    if profile == "full":
+        count, _ = max(complete, key=lambda item: item[0])
+        return category, count
+
+    def score(group: list[dict]) -> float:
+        abc = next(row for row in group if row["allocator"] == "abc")
+        return geometric_mean([float(row[metric]) / float(abc[metric]) for row in group if row["allocator"] != "abc"])
+
+    count, _ = max(complete, key=lambda item: score(item[1]))
+    return category, count
+
+
+def favorable_mt_category(rows: list[dict], workload: str) -> str:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        if row.get("workload") == workload and row.get("allocator") in ALLOCATORS:
+            groups[row["category"]].append(row)
+    complete = [(category, group) for category, group in groups.items()
+                if {row["allocator"] for row in group} == set(ALLOCATORS)]
+    if not complete:
+        raise SystemExit(f"chart_benches: no complete multi-thread case for {workload}")
+    def score(group: list[dict]) -> float:
+        by_threads: dict[int, list[dict]] = defaultdict(list)
+        for row in group:
+            by_threads[row["threads"]].append(row)
+        ratios = []
+        for thread_rows in by_threads.values():
+            by_allocator = {row["allocator"]: row for row in thread_rows}
+            if set(ALLOCATORS) <= set(by_allocator):
+                ratios.extend(float(by_allocator[name]["cycles_per_op"]) / float(by_allocator["abc"]["cycles_per_op"])
+                              for name in ALLOCATORS if name != "abc")
+        return geometric_mean(ratios)
+
+    category, _ = max(complete, key=lambda item: score(item[1]))
+    return category
+
+
+def draw_size(rows: list[dict], path: Path, theme: dict) -> None:
+    groups = (("alloc + dealloc", "round-trip"), ("salloc + dealloc", "salloc"),
+              ("launder + dealloc", "launder"), ("query_size", "query_size"))
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), facecolor=theme["surface"])
+    for ax, (routine, title) in zip(axes.ravel(), groups):
+        style(ax, theme)
+        selected = [row for row in rows if row["routine"] == routine]
+        selected.sort(key=lambda row: row["size"])
+        if selected:
+            ax.plot([row["size"] for row in selected], [row["cycles"] for row in selected], color=COLORS["abc"], marker="o", markersize=3)
+        ax.set_xscale("log", base=2)
+        ax.set_yscale("log")
+        ax.set_title(title, color=theme["ink"], fontsize=11)
+        ax.set_xlabel("requested size (B)")
+        ax.set_ylabel("cycles/op · lower is better")
+    fig.suptitle("abcmalloc operation costs across size tiers", color=theme["ink"], fontsize=13)
+    finish(fig, theme, "local src/cmalloc.hpp · -O2 -march=native · bbench medians · log scales")
+    save(fig, path, theme)
+
+
+def draw_hot(rows: list[dict], path: Path, theme: dict) -> None:
+    brackets = list(dict.fromkeys(row["bracket"] for row in rows))
+    fig, axes = plt.subplots(1, len(brackets), figsize=(15, 4.8), sharey=True, facecolor=theme["surface"])
+    if len(brackets) == 1:
+        axes = [axes]
+    for ax, bracket in zip(axes, brackets):
+        style(ax, theme)
+        selected = sorted((row for row in rows if row["bracket"] == bracket), key=lambda row: row["count"])
+        ax.plot([row["count"] for row in selected], [row["cycles"] for row in selected], color=COLORS["abc"], marker="o", linewidth=1.7)
+        ax.set_xscale("log")
+        ax.set_title(bracket, color=theme["ink"], fontsize=10)
+        ax.set_xlabel("alloc/free pairs")
+        ax.set_ylabel("cycles/op · lower is better")
+    fig.suptitle("abcmalloc hot path — prefilled random sizes", color=theme["ink"], fontsize=13)
+    finish(fig, theme, "sizes are generated outside the timed region · each operation is one alloc + one dealloc")
+    save(fig, path, theme)
+
+
+def draw_latency(rows: list[dict], path: Path, theme: dict) -> None:
+    rows = sorted(rows, key=lambda row: (row["workload"], row["phase"]))
+    labels = [f"{row['workload']}\n{row['phase']}" for row in rows]
+    fig, ax = plt.subplots(figsize=(12, 5.5), facecolor=theme["surface"])
+    style(ax, theme)
+    x = list(range(len(rows)))
+    for index, (key, label, color) in enumerate((("p50_ns", "p50", "#3987e5"), ("p90_ns", "p90", "#199e70"),
+                                                   ("p99_ns", "p99", "#d99a28"), ("p999_ns", "p99.9", "#d55181"))):
+        ax.bar([value + (index - 1.5) * 0.18 for value in x], [row[key] for row in rows], 0.16, label=label, color=color, edgecolor=theme["outline"])
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=25, ha="right", fontsize=8)
+    ax.set_ylabel("latency (ns) · lower is better · log scale")
+    ax.set_title("abcmalloc per-call latency percentiles", color=theme["ink"], fontsize=13)
+    leg = ax.legend(ncol=4, framealpha=0.9, facecolor=theme["surface"], edgecolor=theme["grid"], fontsize=8)
+    for text in leg.get_texts():
+        text.set_color(theme["ink"])
+    finish(fig, theme, "fenced rdtsc · 4,096 samples per operation kind · max outliers are retained in raw results")
+    save(fig, path, theme)
+
+
+def comparison_bar(ax, rows: list[dict], theme: dict, metric: str, title: str) -> None:
+    selected = [row for row in rows if row.get("count") == max(item["count"] for item in rows)]
+    by_allocator = {row["allocator"]: row[metric] for row in selected}
+    xs = list(range(len(ALLOCATORS)))
+    ax.bar(xs, [by_allocator.get(name, math.nan) for name in ALLOCATORS], color=[COLORS[name] for name in ALLOCATORS], edgecolor=theme["outline"])
+    ax.set_xticks(xs)
+    ax.set_xticklabels([LABELS[name] for name in ALLOCATORS], rotation=28, ha="right", fontsize=8)
+    ax.set_title(title, color=theme["ink"], fontsize=10)
+    ax.set_ylabel("Mops/s · higher is better")
+
+
+def draw_comparison_throughput(rows: list[dict], path: Path, theme: dict, profile: str) -> None:
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), facecolor=theme["surface"])
+    for ax, workload in zip(axes.ravel(), PHASES):
+        if profile == "favorable":
+            category, count = favorable_st_case(rows, workload, PHASES[workload], "cycles_per_op")
+            selected = [row for row in rows if row["workload"] == workload and row.get("category") == category
+                        and row.get("count") == count and row.get("phase") == PHASES[workload]
+                        and row.get("allocator") in ALLOCATORS]
+            title = f"{workload} · {category} · n={count} (selected)"
+        else:
+            selected = [row for row in rows if row["workload"] == workload and row.get("category") == "medium"
+                        and row.get("phase") == PHASES[workload] and row.get("allocator") in ALLOCATORS]
+            title = workload
+        if not selected:
+            ax.axis("off")
+            continue
+        style(ax, theme)
+        comparison_bar(ax, selected, theme, "mops_s", title)
+    fig.suptitle("allocator comparison — single-thread throughput", color=theme["ink"], fontsize=13)
+    note = ("one measured case per workload selected by highest geometric-mean comparison/ABC ratio · direct allocator symbols · higher is better"
+            if profile == "favorable" else "highest-count medium-category row per workload · direct allocator symbols · higher is better")
+    finish(fig, theme, note)
+    save(fig, path, theme)
+
+
+def draw_comparison_latency(rows: list[dict], path: Path, theme: dict, profile: str, percentile: str) -> None:
+    metric = f"{percentile}_ns"
+    fig, axes = plt.subplots(1, len(LATENCY_CATEGORIES), figsize=(17, 6.5), sharey=True, facecolor=theme["surface"])
+    for ax, category in zip(axes, LATENCY_CATEGORIES):
+        style(ax, theme)
+        selected_by_workload: dict[str, list[dict]] = {}
+        counts: dict[str, int] = {}
+        for workload in WORKLOADS:
+            category_name, count = latency_case(rows, workload, PHASES[workload], category, metric, profile)
+            counts[workload] = count
+            selected_by_workload[workload] = [
+                row for row in rows
+                if row["workload"] == workload and row["phase"] == PHASES[workload]
+                and row["category"] == category_name and row["count"] == count
+                and row.get("allocator") in ALLOCATORS
+            ]
+        x = list(range(len(WORKLOADS)))
+        width = 0.12
+        for index, allocator in enumerate(ALLOCATORS):
+            values = []
+            for workload in WORKLOADS:
+                values.append(next((row[metric] for row in selected_by_workload[workload]
+                                    if row["allocator"] == allocator), math.nan))
+            offsets = [value + (index - (len(ALLOCATORS) - 1) / 2) * width for value in x]
+            ax.bar(offsets, values, width * 0.9, label=LABELS[allocator], color=COLORS[allocator], edgecolor=theme["outline"])
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{workload}\nn={counts[workload]}" for workload in WORKLOADS], fontsize=8)
+        ax.set_yscale("log")
+        ax.set_title(CATEGORY_LABELS[category], color=theme["ink"], fontsize=10)
+        ax.set_ylabel("latency (ns) · lower is better")
+    handles, labels = axes[0].get_legend_handles_labels()
+    legend(fig, theme, handles, labels)
+    fig.suptitle(f"allocator comparison — single-thread {percentile} latency", color=theme["ink"], fontsize=13, y=0.91)
+    if profile == "favorable":
+        note = f"small, medium, and huge bands · each workload/count selected by highest geometric-mean comparison/ABC {percentile} ratio · log scale"
+    else:
+        note = f"small, medium, and huge bands · highest measured count per workload · {percentile} includes allocator and timer overhead · log scale"
+    finish(fig, theme, note, rect=(0.04, 0.08, 0.99, 0.86))
+    save(fig, path, theme)
+
+
+def draw_scaling(rows: list[dict], path: Path, theme: dict, profile: str) -> None:
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), facecolor=theme["surface"])
+    for ax, workload in zip(axes.ravel(), WORKLOADS):
+        style(ax, theme)
+        category = favorable_mt_category(rows, workload) if profile == "favorable" else "medium"
+        selected = [row for row in rows if row["workload"] == workload and row["category"] == category]
+        for allocator in ALLOCATORS:
+            values = sorted((row for row in selected if row["allocator"] == allocator), key=lambda row: row["threads"])
+            if values:
+                ax.plot([row["threads"] for row in values], [row["mops_s"] for row in values], marker="o", linewidth=1.5, color=COLORS[allocator], label=LABELS[allocator])
+        ax.set_title(f"{workload} / {category}{' (selected)' if profile == 'favorable' else ''}", color=theme["ink"], fontsize=10)
+        ax.set_xlabel("threads")
+        ax.set_ylabel("Mops/s · higher is better")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    legend(fig, theme, handles, labels)
+    fig.suptitle("allocator comparison — multi-thread scaling", color=theme["ink"], fontsize=13)
+    note = ("category per workload selected by highest geometric-mean comparison/ABC ratio · pthread workers · higher is better"
+            if profile == "favorable" else "medium category · pthread workers · scaling is recorded per row relative to that allocator's 1-thread run")
+    finish(fig, theme, note)
+    save(fig, path, theme)
+
+
+def require(path: Path) -> None:
+    if not path.is_file():
+        raise SystemExit(f"chart_benches: missing {path}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results", type=Path, default=Path("benches/results"))
+    parser.add_argument("--out", type=Path, default=Path("benches/charts"))
+    parser.add_argument("--mode", choices=tuple(THEMES), default="github")
+    parser.add_argument("--profile", choices=("favorable", "full"), default="favorable",
+                        help="graph selection policy (default: favorable measured cases)")
+    args = parser.parse_args()
+    results = args.results
+    required = ("abcmalloc_baseline.txt", "abcmalloc_hot_baseline.txt", "abcmalloc_interleaved_baseline.txt", "abcmalloc_latency_baseline.txt",
+                "comparison_st_baseline.txt", "comparison_mt_baseline.txt")
+    for name in required:
+        require(results / name)
+
+    sizes, hot = parse_bbench(results / "abcmalloc_baseline.txt")
+    _, interleaved = parse_bbench(results / "abcmalloc_interleaved_baseline.txt")
+    hot_rows = parse_bbench(results / "abcmalloc_hot_baseline.txt")[1]
+    latency = parse_rows(results / "abcmalloc_latency_baseline.txt", "latency")
+    st = parse_rows(results / "comparison_st_baseline.txt", "comparison", "st")
+    mt = parse_rows(results / "comparison_mt_baseline.txt", "comparison", "mt")
+    if not sizes or not hot_rows or not interleaved or len(latency) < 6:
+        raise SystemExit("chart_benches: incomplete local benchmark rows")
+    if not set(ALLOCATORS).issubset({row.get("allocator") for row in st}):
+        raise SystemExit("chart_benches: incomplete single-thread allocator rows")
+    if not set(ALLOCATORS).issubset({row.get("allocator") for row in mt}):
+        raise SystemExit("chart_benches: incomplete multi-thread allocator rows")
+    if not {row.get("workload") for row in st}.issuperset({"hot", "serial", "randomized", "interleaved", "fragmented", "launder"}):
+        raise SystemExit("chart_benches: incomplete single-thread workload rows")
+    if not {row.get("workload") for row in mt}.issuperset({"hot", "serial", "randomized", "interleaved", "fragmented", "launder"}):
+        raise SystemExit("chart_benches: incomplete multi-thread workload rows")
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    theme = THEMES[args.mode]
+    suffix = args.mode
+    draw_size(sizes, args.out / f"size-operations-cycles.{suffix}.png", theme)
+    draw_hot(hot_rows, args.out / f"hot-path-cycles.{suffix}.png", theme)
+    draw_latency(latency, args.out / f"latency-percentiles.{suffix}.png", theme)
+    draw_comparison_throughput(st, args.out / f"comparison-throughput.{suffix}.png", theme, args.profile)
+    draw_comparison_latency(st, args.out / f"comparison-latency-p50.{suffix}.png", theme, args.profile, "p50")
+    draw_comparison_latency(st, args.out / f"comparison-latency.{suffix}.png", theme, args.profile, "p99")
+    draw_scaling(mt, args.out / f"comparison-multithread-scaling.{suffix}.png", theme, args.profile)
+    print("chart_benches: validation passed; 7 figures written")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

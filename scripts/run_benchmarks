@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Build and run abcmalloc's hosted benchmark suite with provenance."""
+
+from __future__ import annotations
+
+import argparse
+import math
+import os
+import platform
+import re
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+TARGETS = (
+    ("abcmalloc", "bin/bbench_abc", "abcmalloc_baseline.txt"),
+    ("abcmalloc_hot", "bin/bbench_abc_hot", "abcmalloc_hot_baseline.txt"),
+    ("abcmalloc_interleaved", "bin/bbench_abc_interleaved", "abcmalloc_interleaved_baseline.txt"),
+    ("abcmalloc_latency", "bin/bench_abcmalloc_latency", "abcmalloc_latency_baseline.txt"),
+    ("comparison_st", "bin/bench_abcmalloc_pathways", "comparison_st_baseline.txt"),
+    ("comparison_mt", "bin/bench_abcmalloc_pathways_mt", "comparison_mt_baseline.txt"),
+)
+ALLOCATORS = {"abc", "glibc", "mimalloc", "jemalloc", "tcmalloc", "tbbmalloc"}
+WORKLOADS = {"hot", "serial", "randomized", "interleaved", "fragmented", "launder"}
+SINGLE_THREAD_TARGETS = {"abcmalloc", "abcmalloc_hot", "abcmalloc_interleaved", "abcmalloc_latency", "comparison_st"}
+ROW = re.compile(r"^row\s+(?P<body>.*)$")
+FIELD = re.compile(r"(?P<key>[A-Za-z0-9_]+)=(?P<value>\S+)")
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def host_cpu() -> str:
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lower().startswith("model name") and ":" in line:
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
+
+
+def compiler_version(cxx: str) -> str:
+    try:
+        return subprocess.check_output([cxx, "--version"], cwd=ROOT, text=True, stderr=subprocess.STDOUT).splitlines()[0]
+    except (OSError, subprocess.CalledProcessError, IndexError):
+        return cxx
+
+
+def run(command: list[str], *, capture: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    print("$", " ".join(command), flush=True)
+    return subprocess.run(
+        command,
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=capture,
+        env={**os.environ, "LC_ALL": "C", **(env or {})},
+    )
+
+
+def fields(line: str) -> dict[str, str]:
+    return {match.group("key"): match.group("value") for match in FIELD.finditer(line)}
+
+
+def validate(name: str, output: str) -> None:
+    if "local src/cmalloc.hpp" not in output:
+        raise SystemExit(f"{name}: output does not identify the local src/ implementation")
+    if name in {"abcmalloc", "abcmalloc_hot", "abcmalloc_interleaved", "abcmalloc_latency", "comparison_st"}:
+        if "allocator locks disabled" not in output and "allocator_locks=disabled" not in output:
+            raise SystemExit(f"{name}: single-thread benchmark did not report disabled allocator locks")
+    if name == "comparison_mt" and "allocator_locks=enabled" not in output:
+        raise SystemExit(f"{name}: multi-thread benchmark did not report enabled allocator locks")
+    if name == "abcmalloc_latency":
+        rows = [fields(match.group("body")) for line in output.splitlines() if (match := ROW.match(line))]
+        if len(rows) < 6 or {row.get("workload") for row in rows} != {"tlsf", "buddy", "mixed"}:
+            raise SystemExit(f"{name}: expected alloc/free latency rows for tlsf, buddy, and mixed")
+        for row in rows:
+            if int(row.get("samples", "0")) < 1024:
+                raise SystemExit(f"{name}: latency row has too few samples: {row}")
+        return
+    if name in {"comparison_st", "comparison_mt"}:
+        rows = [fields(match.group("body")) for line in output.splitlines() if (match := ROW.match(line))]
+        if not rows:
+            raise SystemExit(f"{name}: no stable comparison rows found")
+        found_allocators = {row.get("allocator") for row in rows}
+        missing = ALLOCATORS - found_allocators
+        if missing:
+            raise SystemExit(f"{name}: missing allocator rows: {', '.join(sorted(missing))}")
+        found_workloads = {row.get("workload") for row in rows}
+        missing = WORKLOADS - found_workloads
+        if missing:
+            raise SystemExit(f"{name}: missing workload rows: {', '.join(sorted(missing))}")
+        if name == "comparison_st":
+            required_categories = {"small", "medium", "huge"}
+            missing = required_categories - {row.get("category") for row in rows}
+            if missing:
+                raise SystemExit(f"{name}: missing latency size bands: {', '.join(sorted(missing))}")
+        for row in rows:
+            ratio = float(row.get("ratio", "nan"))
+            if not math.isfinite(ratio) or ratio < 0:
+                raise SystemExit(f"{name}: invalid comparison ratio: {row}")
+            if int(row.get("samples", "0")) < 1:
+                raise SystemExit(f"{name}: invalid sample count: {row}")
+            if int(row.get("operations", "0")) < 1:
+                raise SystemExit(f"{name}: invalid operation count: {row}")
+            for metric in ("p50_ns", "p99_ns"):
+                value = float(row.get(metric, "nan"))
+                if not math.isfinite(value) or value < 0:
+                    raise SystemExit(f"{name}: invalid {metric}: {row}")
+        return
+    if "implementation: local src/cmalloc.hpp" not in output or ("cycles/op=" not in output and "cyc/op" not in output):
+        raise SystemExit(f"{name}: no local benchmark rows found")
+
+
+def library_provenance(binary: str) -> str:
+    try:
+        output = subprocess.check_output(["ldd", str(ROOT / binary)], cwd=ROOT, text=True, stderr=subprocess.STDOUT)
+        names = []
+        for line in output.splitlines():
+            if any(token in line for token in ("tcmalloc", "tbbmalloc", "mimalloc", "jemalloc")):
+                names.append(line.strip())
+        return "; ".join(names) if names else "none"
+    except (OSError, subprocess.CalledProcessError):
+        return "unavailable"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cpu", type=int, default=3, help="CPU passed to taskset (default: 3)")
+    parser.add_argument("--results", type=Path, default=Path("benches/results"))
+    parser.add_argument("--cxx", default="g++", help="compiler recorded in provenance")
+    parser.add_argument("--no-build", action="store_true", help="use already-built benchmark binaries")
+    args = parser.parse_args()
+
+    allowed = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set(range(os.cpu_count() or 1))
+    if args.cpu < 0 or args.cpu not in allowed:
+        parser.error(f"--cpu must be one of the currently available CPUs: {sorted(allowed)}")
+    if subprocess.call(["which", "taskset"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+        parser.error("taskset is required for reproducible CPU pinning")
+
+    if not args.no_build:
+        run(["ninja", "abcmalloc_readme_benchmarks"])
+
+    results_dir = args.results if args.results.is_absolute() else ROOT / args.results
+    results_dir.mkdir(parents=True, exist_ok=True)
+    compiler = compiler_version(args.cxx)
+    common_env = {"ABCMALLOC_BENCH_CPU": str(args.cpu)}
+    runner = "scripts/run_benchmarks " + " ".join(sys.argv[1:])
+
+    for name, binary, filename in TARGETS:
+        command = ["taskset", "-c", str(args.cpu), str(ROOT / binary)]
+        completed = run(command, capture=True, env=common_env)
+        output = completed.stdout + completed.stderr
+        validate(name, output)
+        observed = re.search(r"(?:# mode=.*?cpu=|# cpu=|cpu:\s*)(-?\d+)", output)
+        observed_cpu = observed.group(1) if observed else "taskset"
+        if observed and int(observed_cpu) != args.cpu:
+            raise SystemExit(f"{name}: benchmark reported CPU {observed_cpu}, requested {args.cpu}")
+        header = [
+            f"# {name} baseline",
+            f"# date: {utc_now()}",
+            f"# host: {host_cpu()}",
+            f"# kernel: {platform.release()}",
+            f"# cpu_requested: {args.cpu}",
+            f"# cpu_observed: {observed_cpu}",
+            f"# compiler: {compiler}",
+            "# flags: -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH"
+            + (" -DMICRON_ABC_SINGLE_THREADED" if name in SINGLE_THREAD_TARGETS else ""),
+            "# build: ninja abcmalloc_readme_benchmarks",
+            f"# target: {binary}",
+            f"# libraries: {library_provenance(binary)}",
+            f"# run: {' '.join(command)}",
+            f"# runner: {runner}",
+        ]
+        content = "\n".join(header) + "\n" + output.rstrip() + "\n"
+        destination = results_dir / filename
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=results_dir, prefix=f".{filename}.", delete=False) as temp:
+            temp.write(content)
+            temporary = Path(temp.name)
+        temporary.replace(destination)
+        print(f"wrote {destination}")
+
+    print(f"completed {len(TARGETS)} targets on CPU {args.cpu}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

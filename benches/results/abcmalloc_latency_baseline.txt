@@ -1,0 +1,24 @@
+# abcmalloc_latency baseline
+# date: 2026-09-07T19:39:34Z
+# host: Intel(R) Core(TM) i7-5960X CPU @ 3.00GHz
+# kernel: 7.1.13-200.fc44.x86_64
+# cpu_requested: 3
+# cpu_observed: 3
+# compiler: g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+# flags: -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH -DMICRON_ABC_SINGLE_THREADED
+# build: ninja abcmalloc_readme_benchmarks
+# target: bin/bench_abcmalloc_latency
+# libraries: none
+# run: taskset -c 3 /code/C++/abcmalloc/bin/bench_abcmalloc_latency
+# runner: scripts/run_benchmarks --cpu 3 --no-build --results benches/results
+# calibration_sink=1999999000000
+# suite=abcmalloc latency benchmark
+# implementation=local src/cmalloc.hpp
+# cpu=3
+# threading=single-threaded allocator_locks=disabled tsc_ns=0.333161
+row suite=latency allocator=abc workload=tlsf phase=alloc samples=4096 p50_ns=25.99 p90_ns=46.98 p99_ns=93.95 p999_ns=1366.29 max_ns=3360.26
+row suite=latency allocator=abc workload=tlsf phase=free samples=4096 p50_ns=37.98 p90_ns=46.98 p99_ns=76.96 p999_ns=114.94 max_ns=529.73
+row suite=latency allocator=abc workload=buddy phase=alloc samples=4096 p50_ns=23.99 p90_ns=1307.32 p99_ns=5763.02 p999_ns=9778.95 max_ns=38024.35
+row suite=latency allocator=abc workload=buddy phase=free samples=4096 p50_ns=47.98 p90_ns=67.96 p99_ns=117.94 p999_ns=337.83 max_ns=28809.11
+row suite=latency allocator=abc workload=mixed phase=alloc samples=4096 p50_ns=25.99 p90_ns=39.98 p99_ns=76.96 p999_ns=2585.66 max_ns=4640.60
+row suite=latency allocator=abc workload=mixed phase=free samples=4096 p50_ns=36.98 p90_ns=47.98 p99_ns=78.96 p999_ns=112.94 max_ns=183.90

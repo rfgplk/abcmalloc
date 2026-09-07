@@ -28,7 +28,11 @@
 //   cells hold only one allocation at a time. Total RSS for the whole run
 //   stays well below the user-specified 4 GiB ceiling.
 
+#include "bench_common.hpp"
+#include "../src/cmalloc.hpp"
 #include "../external/bbench/bench.hpp"
+
+static_assert(!abc::__default_multithread_safe, "single-thread bbench must compile with allocator locks disabled");
 
 #include <micron/io/console.hpp>
 #include <micron/io/stdout.hpp>
@@ -333,6 +337,11 @@ sweep_variants()
   print_section("[variants] salloc / balloc / launder / calloc / aligned_alloc — round-trip");
 
   for ( u64 sz : SIZES ) {
+    // The local mirror's zeroing/alignment extensions are intentionally kept
+    // to the hot tiers here.  The primary sweep covers the full large and gb
+    // ranges; this avoids making optional variants a second page-provisioning
+    // stress test on hosts with strict overcommit policy.
+    if ( sz > (16ULL << 10) ) continue;
     const u64 reps = round_trip_reps(sz);
 
     {
@@ -514,10 +523,7 @@ int
 main(void)
 {
 
-  micron::posix::cpu_set_t set;
-  set.cpu_zero();
-  set.cpu_set(0);
-  micron::posix::sched_setaffinity(0, sizeof(set), set);
+  const int cpu = abcmalloc_bench::pin_from_environment();
 
   {
     byte *warm = abc::alloc(16);
@@ -525,6 +531,9 @@ main(void)
   }
 
   micron::io::println("=== abcmalloc benchmark ===");
+  micron::io::println("implementation: local src/cmalloc.hpp (abcmalloc)");
+  micron::io::println("cpu: ", cpu);
+  micron::io::println("threading: single-threaded (allocator locks disabled)");
   micron::io::println("sizes: 16 B .. 16 MiB (spans precise -> gb tier)");
   micron::io::println("warmup: ", WARMUP_REPS, " kernel reps; ", K_MEASUREMENTS, " measurements per cell (median)");
   micron::io::println("perf events: cycles + instructions + branches + branch-misses (bbench 4-event group)");

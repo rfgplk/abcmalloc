@@ -1,0 +1,49 @@
+# abcmalloc_interleaved baseline
+# date: 2026-09-07T19:39:34Z
+# host: Intel(R) Core(TM) i7-5960X CPU @ 3.00GHz
+# kernel: 7.1.13-200.fc44.x86_64
+# cpu_requested: 3
+# cpu_observed: 3
+# compiler: g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+# flags: -std=c++23 -O2 -march=native -fno-stack-protector -fno-lto -DABCMALLOC_LOCAL_BENCH -DMICRON_ABC_SINGLE_THREADED
+# build: ninja abcmalloc_readme_benchmarks
+# target: bin/bbench_abc_interleaved
+# libraries: none
+# run: taskset -c 3 /code/C++/abcmalloc/bin/bbench_abc_interleaved
+# runner: scripts/run_benchmarks --cpu 3 --no-build --results benches/results
+=== abcmalloc interleaved-alloc benchmark ===
+implementation: local src/cmalloc.hpp (abcmalloc)
+cpu: 3
+threading: single-threaded (allocator locks disabled)
+sizes prefilled into static array via micron::math::rng::xoshiro256ss + dist::uniform_int
+brackets span up to four tiers (precise / small / medium / large) per pass
+warmup: 1 untimed pass; 5 measured passes per cell (median reported)
+perf events: cycles + instructions + branches + branch-misses (bbench 4-event group)
+each iteration is one alloc + one dealloc (round-trip); peak live = max size in bracket
+
+[interleave] alloc(g_sizes[i]) + dealloc(p) — sizes span multiple tiers per pass
+bracket              count       ops/rep      cyc/op       IPC      bmiss%
+------------------------------------------------------------------------
+1-32 B                5000         10000       21.08      3.89        0.00
+1-32 B               10000         20000       21.04      3.90        0.00
+1-32 B              100000        200000       21.05      3.89        0.00
+1-32 B             1000000       2000000       21.14      3.88        0.00
+1-512 B               5000         10000       22.07      3.87        0.00
+1-512 B              10000         20000       22.05      3.88        0.00
+1-512 B             100000        200000       22.13      3.86        0.00
+1-512 B            1000000       2000000       22.15      3.86        0.00
+1-4 KiB               5000         10000       27.16      3.76        0.21
+1-4 KiB              10000         20000       27.08      3.77        0.21
+1-4 KiB             100000        200000       27.11      3.77        0.22
+1-4 KiB            1000000       2000000       27.52      3.71        0.22
+1-16 KiB              5000         10000       30.31      3.48        0.43
+1-16 KiB             10000         20000       30.30      3.48        0.44
+1-16 KiB            100000        200000       30.29      3.48        0.43
+1-16 KiB           1000000       2000000       30.77      3.43        0.43
+interleaved           5000         10000       33.10      2.88        1.35
+interleaved          10000         20000       33.28      2.86        1.40
+interleaved         100000        200000       33.57      2.85        1.42
+interleaved        1000000       2000000       33.84      2.82        1.42
+
+=== done ===
+(anti-DCE sink: 42036)
