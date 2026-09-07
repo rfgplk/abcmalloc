@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <micron/memory/addr.hpp>
 #include <micron/syscall.hpp>
 #include <micron/type_traits.hpp>
 #include <micron/types.hpp>

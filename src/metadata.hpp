@@ -19,6 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
+#include <micron/memory/addr.hpp>
 #include <micron/memory/pointers/sentinel.hpp>
 #include <micron/types.hpp>
 
@@ -49,13 +50,13 @@ constexpr static usize __hdr_offset = sizeof(micron::simd::i256);
 inline block_header *
 get_block_header(byte *user_ptr)
 {
-  return reinterpret_cast<block_header *>(user_ptr - __hdr_offset);
+  return micron::ptr_cast<block_header *>(user_ptr - __hdr_offset);
 }
 
 inline addr_t *
 get_metadata_addr(addr_t *ptr)
 {
-  return reinterpret_cast<addr_t *>(reinterpret_cast<byte *>(ptr) - __hdr_offset);
+  return micron::ptr_cast<addr_t *>(reinterpret_cast<byte *>(ptr) - __hdr_offset);
 }
 
 };      // namespace abc
